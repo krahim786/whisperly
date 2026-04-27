@@ -126,6 +126,47 @@ struct whisperlyApp: App {
             )
         }
         .windowResizability(.contentSize)
+
+        Window("About Whisperly", id: "about") {
+            AboutView()
+        }
+        .windowResizability(.contentSize)
+
+        Window("Acknowledgements", id: "acknowledgements") {
+            AcknowledgementsView()
+        }
+        .windowResizability(.contentSize)
+
+        Window("Whisperly Help", id: "help") {
+            HelpCheatSheetView()
+        }
+        .windowResizability(.contentSize)
+        .commands {
+            // Replace the default Help menu with our cheat sheet entry.
+            CommandGroup(replacing: .help) {
+                Button("Whisperly Help") {
+                    NotificationCenter.default.post(name: .showHelpCheatSheet, object: nil)
+                }
+                .keyboardShortcut("?", modifiers: [.command])
+                Divider()
+                Button("Privacy") {
+                    if let url = Bundle.main.url(forResource: "PRIVACY", withExtension: "md") {
+                        NSWorkspace.shared.open(url)
+                    } else if let url = URL(string: "https://github.com/anthropics/claude-code") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                Button("Acknowledgements") {
+                    NotificationCenter.default.post(name: .showAcknowledgements, object: nil)
+                }
+            }
+            // Replace the default About menu item to open our custom window.
+            CommandGroup(replacing: .appInfo) {
+                Button("About Whisperly") {
+                    NotificationCenter.default.post(name: .showAbout, object: nil)
+                }
+            }
+        }
     }
 
     private func iconName(for phase: AppState.Phase) -> String {
@@ -205,6 +246,16 @@ private struct MenuBarContent: View {
             }
             .keyboardShortcut(",", modifiers: [.command])
             Divider()
+            Button("About Whisperly") {
+                openWindow(id: "about")
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            Button("Whisperly Help") {
+                openWindow(id: "help")
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            .keyboardShortcut("?", modifiers: [.command])
+            Divider()
             Button("Quit Whisperly") {
                 NSApp.terminate(nil)
             }
@@ -227,6 +278,18 @@ private struct MenuBarContent: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .reopenOnboarding)) { _ in
             openWindow(id: "onboarding")
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showAbout)) { _ in
+            openWindow(id: "about")
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showAcknowledgements)) { _ in
+            openWindow(id: "acknowledgements")
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showHelpCheatSheet)) { _ in
+            openWindow(id: "help")
             NSApp.activate(ignoringOtherApps: true)
         }
     }
