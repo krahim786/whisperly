@@ -1,11 +1,12 @@
+import AppKit
+import AVFoundation
 import Combine
 import Foundation
 import os
 import SwiftUI
 
 /// Single ObservableObject that owns the dictation state machine and the
-/// references to all collaborators. The HotkeyManager calls
-/// `onHotkeyPressed`/`onHotkeyReleased`; this class drives the rest.
+/// references to all collaborators.
 @MainActor
 final class AppState: ObservableObject {
     enum Phase: Equatable {
@@ -51,7 +52,12 @@ final class AppState: ObservableObject {
     private var pressedAt: Date?
     private var inFlightTask: Task<Void, Never>?
 
+    /// Mode for the cycle currently in flight. Set on press, consumed on pipeline completion.
     private var currentMode: DictationMode = .dictation
+
+    /// Async task for the Cmd+C selection fallback, in case AX selection-reading
+    /// fails (e.g. Electron). Awaited before the pipeline routes to edit/dictation.
+    private var pendingSelectionFallback: Task<String?, Never>?
 
     init(
         hotkey: HotkeyManager,
@@ -101,6 +107,28 @@ final class AppState: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        // Recorder publishes a max-length-hit signal; surface it in the HUD.
+        recorder.maxLengthHits
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                self?.flashError("Recording capped at 60s.")
+            }
+            .store(in: &cancellables)
+
+        // Audio interruptions: cancel cleanly so we don't try to transcribe
+        // a corrupt or empty file.
+        let ws = NSWorkspace.shared.notificationCenter
+        ws.publisher(for: NSWorkspace.willSleepNotification)
+            .merge(with: ws.publisher(for: NSWorkspace.sessionDidResignActiveNotification))
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.handleAudioInterruption(reason: "system sleeping") }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .AVAudioEngineConfigurationChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.handleAudioInterruption(reason: "audio device changed") }
+            .store(in: &cancellables)
     }
 
     func bootstrap() {
@@ -117,23 +145,32 @@ final class AppState: ObservableObject {
     private func onHotkeyPressed() {
         guard phase == .idle else {
             logger.info("Hotkey pressed while phase=\(String(describing: self.phase), privacy: .public) — ignoring re-entry.")
+            FileLogger.shared.write(category: "AppState", level: "info", "Re-entry ignored — phase=\(self.phase)")
             return
         }
 
-        let selection = context.getSelectedText()
-        if let selection {
+        // Synchronous AX read first — fast path. Most native apps return here.
+        if let selection = context.getSelectedText() {
             currentMode = .edit(selection: selection)
             modeDisplay = "Editing selection"
-            logger.info("Edit mode — selection: \(selection.count, privacy: .public) chars")
+            pendingSelectionFallback = nil
+            logger.info("Edit mode (AX) — selection: \(selection.count, privacy: .public) chars")
         } else {
+            // AX returned nothing. Tentatively dictation; fire ⌘C fallback in
+            // parallel. If it lands before the user releases, we upgrade to edit.
             currentMode = .dictation
             modeDisplay = nil
+            pendingSelectionFallback?.cancel()
+            pendingSelectionFallback = Task { [context] in
+                await context.getSelectedTextViaCopy()
+            }
         }
 
         pressedAt = Date()
         amplitudeHistory.removeAll(keepingCapacity: true)
         phase = .recording
         sound.playStart()
+        FileLogger.shared.write(category: "AppState", level: "info", "Recording started")
         Task { [recorder] in
             do {
                 try await recorder.startRecording()
@@ -156,6 +193,8 @@ final class AppState: ObservableObject {
         if held < minimumHoldDuration {
             logger.info("Hold duration \(String(format: "%.3f", held))s under threshold — cancelling.")
             recorder.cancel()
+            pendingSelectionFallback?.cancel()
+            pendingSelectionFallback = nil
             phase = .idle
             modeDisplay = nil
             return
@@ -169,6 +208,20 @@ final class AppState: ObservableObject {
 
     private func runPipeline(holdDuration: TimeInterval) async {
         let appName = context.frontmostAppName()
+
+        // Resolve the Cmd+C fallback, if any, before deciding the cycle mode.
+        // We only "upgrade" dictation→edit if the fallback returned a selection
+        // and we're still in dictation mode (user didn't already get an AX hit).
+        if let pending = pendingSelectionFallback {
+            let fallback = await pending.value
+            pendingSelectionFallback = nil
+            if let fallback, case .dictation = currentMode {
+                currentMode = .edit(selection: fallback)
+                modeDisplay = "Editing selection"
+                logger.info("Edit mode (⌘C fallback) — selection: \(fallback.count, privacy: .public) chars")
+                FileLogger.shared.write(category: "AppState", level: "info", "Edit mode via Cmd+C fallback")
+            }
+        }
         let cycleMode = currentMode
 
         // 1. Stop recording → URL
@@ -185,13 +238,14 @@ final class AppState: ObservableObject {
             return
         }
 
-        // 2. Groq transcribe (with dictionary biasing terms)
+        // 2. Groq transcribe
         let biasingTerms = dictionary.topTermsForBiasing(limit: 20)
         let transcript: String
         do {
             transcript = try await groq.transcribe(audioURL: audioURL, biasingTerms: biasingTerms)
         } catch {
             try? FileManager.default.removeItem(at: audioURL)
+            FileLogger.shared.write(category: "AppState", level: "error", "Groq failed: \(error.localizedDescription)")
             flashError(error.localizedDescription)
             return
         }
@@ -204,15 +258,12 @@ final class AppState: ObservableObject {
             return
         }
 
-        // 3. Resolve mode and produce final text.
-        //    Edit mode is locked in at press time and bypasses snippet/command checks.
-        //    Otherwise: snippet expansion (no LLM) → command mode → dictation cleanup.
         let dictionaryJSON = dictionary.jsonForPrompt()
 
-        // 3a. Snippet bypass (only when not editing a selection).
+        // 3a. Snippet bypass
         if case .dictation = cycleMode,
            let snippet = SnippetMatcher.match(transcript: transcript, in: snippets.snippets) {
-            logger.info("Snippet matched: \(snippet.trigger, privacy: .public) → expansion (\(snippet.expansion.count, privacy: .public) chars)")
+            logger.info("Snippet matched: \(snippet.trigger, privacy: .public) → \(snippet.expansion.count, privacy: .public) chars")
             phase = .pasting
             await inserter.paste(snippet.expansion)
             phase = .idle
@@ -238,21 +289,31 @@ final class AppState: ObservableObject {
             switch cycleMode {
             case .dictation:
                 if CommandPrompt.looksLikeCommand(transcript) {
-                    cleaned = try await haiku.command(transcript: transcript, appName: appName, dictionaryJSON: dictionaryJSON)
+                    cleaned = try await haikuWithRetry { [haiku] in
+                        try await haiku.command(transcript: transcript, appName: appName, dictionaryJSON: dictionaryJSON)
+                    }
                     historyMode = .command
                     selectionForLog = nil
                 } else {
-                    cleaned = try await haiku.cleanup(transcript: transcript, appName: appName, dictionaryJSON: dictionaryJSON)
+                    cleaned = try await haikuWithRetry { [haiku] in
+                        try await haiku.cleanup(transcript: transcript, appName: appName, dictionaryJSON: dictionaryJSON)
+                    }
                     historyMode = .dictation
                     selectionForLog = nil
                 }
             case .edit(let selection):
-                cleaned = try await haiku.editSelection(selection: selection, instruction: transcript, appName: appName, dictionaryJSON: dictionaryJSON)
+                cleaned = try await haikuWithRetry { [haiku] in
+                    try await haiku.editSelection(selection: selection, instruction: transcript, appName: appName, dictionaryJSON: dictionaryJSON)
+                }
                 historyMode = .edit
                 selectionForLog = selection
             }
         } catch {
+            // Haiku failed even after one retry. Paste the raw transcript (or
+            // the unchanged selection in edit mode) so the user gets *something*,
+            // and surface "polish skipped" so they know polish was bypassed.
             logger.error("Haiku failed; falling back. Error: \(error.localizedDescription, privacy: .public)")
+            FileLogger.shared.write(category: "AppState", level: "error", "Haiku failed (after retry): \(error.localizedDescription)")
             phase = .pasting
             switch cycleMode {
             case .dictation:
@@ -260,8 +321,7 @@ final class AppState: ObservableObject {
             case .edit(let selection):
                 await inserter.replaceSelection(with: selection)
             }
-            phase = .idle
-            modeDisplay = nil
+            flashWarning("Polish skipped — \(error.localizedDescription)")
             return
         }
 
@@ -287,6 +347,33 @@ final class AppState: ObservableObject {
         )
     }
 
+    /// Wraps a Haiku call with one retry on rate-limit. After 1 second we try
+    /// again; a second failure throws so the caller can fall back.
+    private func haikuWithRetry(_ call: @escaping () async throws -> String) async throws -> String {
+        do {
+            return try await call()
+        } catch HaikuClientError.rateLimited {
+            logger.warning("Haiku rate-limited; retrying in 1s.")
+            FileLogger.shared.write(category: "AppState", level: "warn", "Haiku rate-limited; retrying once")
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            return try await call()
+        }
+    }
+
+    // MARK: - Audio interruption
+
+    private func handleAudioInterruption(reason: String) {
+        guard phase == .recording else { return }
+        logger.warning("Audio interruption: \(reason, privacy: .public) — cancelling.")
+        FileLogger.shared.write(category: "AppState", level: "warn", "Audio interrupted: \(reason)")
+        recorder.cancel()
+        pendingSelectionFallback?.cancel()
+        pendingSelectionFallback = nil
+        flashError("Recording interrupted (\(reason)).")
+    }
+
+    // MARK: - History
+
     private func logHistory(
         mode: HistoryEntry.Mode,
         appName: String,
@@ -310,12 +397,32 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - HUD messaging
+
     private func flashError(_ message: String) {
         logger.error("\(message, privacy: .public)")
         phase = .error(message)
         modeDisplay = nil
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await MainActor.run {
+                guard let self else { return }
+                if case .error = self.phase {
+                    self.phase = .idle
+                }
+            }
+        }
+    }
+
+    /// Like flashError, but used when we've already pasted something and just
+    /// want to surface a warning that polish was skipped. Goes back to .idle
+    /// after the message.
+    private func flashWarning(_ message: String) {
+        logger.warning("\(message, privacy: .public)")
+        phase = .error(message)
+        modeDisplay = nil
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
             await MainActor.run {
                 guard let self else { return }
                 if case .error = self.phase {

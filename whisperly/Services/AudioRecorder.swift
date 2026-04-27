@@ -67,6 +67,13 @@ final class AudioRecorder: @unchecked Sendable {
         amplitudeSubject.eraseToAnyPublisher()
     }
 
+    /// Fires once when the max-recording-length safeguard auto-stops the
+    /// engine. Lets AppState surface a "Recording capped at 60s" message.
+    nonisolated private let maxLengthHitSubject = PassthroughSubject<Void, Never>()
+    nonisolated var maxLengthHits: AnyPublisher<Void, Never> {
+        maxLengthHitSubject.eraseToAnyPublisher()
+    }
+
     init() {
         cleanupOldTempFiles()
     }
@@ -328,6 +335,7 @@ final class AudioRecorder: @unchecked Sendable {
                     self.engine.inputNode.removeTap(onBus: 0)
                     self.engine.stop()
                 }
+                self.maxLengthHitSubject.send()
                 // Leave file/converter set so a subsequent stopRecording() can
                 // still read the URL. We just released the hardware.
             }

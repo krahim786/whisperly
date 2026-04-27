@@ -63,6 +63,7 @@ final class HotkeyConfig: ObservableObject {
         static let showHUD = "hotkey.showHUD"
         static let historyEnabled = "history.enabled"
         static let historyRetentionDays = "history.retentionDays"
+        static let verboseLogging = "logging.verbose"
     }
 
     @Published var mode: Mode {
@@ -93,6 +94,13 @@ final class HotkeyConfig: ObservableObject {
         didSet { UserDefaults.standard.set(historyRetentionDays, forKey: Defaults.historyRetentionDays) }
     }
 
+    @Published var verboseLogging: Bool {
+        didSet {
+            UserDefaults.standard.set(verboseLogging, forKey: Defaults.verboseLogging)
+            FileLogger.shared.setEnabled(verboseLogging)
+        }
+    }
+
     private init() {
         let d = UserDefaults.standard
         self.mode = Mode(rawValue: d.string(forKey: Defaults.mode) ?? "") ?? .hold
@@ -106,5 +114,8 @@ final class HotkeyConfig: ObservableObject {
         self.historyEnabled = (d.object(forKey: Defaults.historyEnabled) as? Bool) ?? true
         let storedRetention = d.object(forKey: Defaults.historyRetentionDays) as? Int
         self.historyRetentionDays = storedRetention ?? 90
+        let verbose = (d.object(forKey: Defaults.verboseLogging) as? Bool) ?? false
+        self.verboseLogging = verbose
+        FileLogger.shared.setEnabled(verbose)
     }
 }
