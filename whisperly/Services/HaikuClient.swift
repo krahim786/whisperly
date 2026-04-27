@@ -43,12 +43,33 @@ nonisolated final class HaikuClient: Sendable {
     }
 
     func cleanup(transcript: String, appName: String) async throws -> String {
+        let systemPrompt = DictationPrompt.system()
+        let userMessage = "Target app: \(appName)\nRaw transcript: \(transcript)"
+        return try await complete(system: systemPrompt, user: userMessage, label: "cleanup")
+    }
+
+    /// Edit-mode call: rewrite `selection` according to the spoken `instruction`.
+    /// Same prompt-cached `system` block convention as `cleanup` so the prompt
+    /// prefix stays warm across modes.
+    func editSelection(selection: String, instruction: String, appName: String) async throws -> String {
+        let systemPrompt = EditPrompt.system()
+        let userMessage = """
+            Target app: \(appName)
+            Selected text:
+            \"\"\"
+            \(selection)
+            \"\"\"
+            Spoken instruction: \(instruction)
+            """
+        return try await complete(system: systemPrompt, user: userMessage, label: "edit")
+    }
+
+    // MARK: - Shared completion path
+
+    private func complete(system: String, user: String, label: String) async throws -> String {
         guard let apiKey = keychain.load(key: KeychainService.anthropicAPIKey), !apiKey.isEmpty else {
             throw HaikuClientError.missingAPIKey
         }
-
-        let systemPrompt = DictationPrompt.system()
-        let userMessage = "Target app: \(appName)\nRaw transcript: \(transcript)"
 
         let body: [String: Any] = [
             "model": model,
@@ -56,14 +77,14 @@ nonisolated final class HaikuClient: Sendable {
             "system": [
                 [
                     "type": "text",
-                    "text": systemPrompt,
+                    "text": system,
                     "cache_control": ["type": "ephemeral"],
                 ]
             ],
             "messages": [
                 [
                     "role": "user",
-                    "content": userMessage,
+                    "content": user,
                 ]
             ],
         ]
@@ -127,7 +148,7 @@ nonisolated final class HaikuClient: Sendable {
         let cacheRead = decoded.usage?.cache_read_input_tokens ?? 0
         let input = decoded.usage?.input_tokens ?? 0
         let output = decoded.usage?.output_tokens ?? 0
-        logger.info("Haiku cleanup \(String(format: "%.2f", elapsed))s — input:\(input) output:\(output) cache_create:\(cacheCreate) cache_read:\(cacheRead)")
+        logger.info("Haiku \(label, privacy: .public) \(String(format: "%.2f", elapsed))s — input:\(input) output:\(output) cache_create:\(cacheCreate) cache_read:\(cacheRead)")
 
         guard let text = decoded.content.first(where: { $0.type == "text" })?.text,
               !text.isEmpty else {
