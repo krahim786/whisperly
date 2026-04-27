@@ -24,6 +24,52 @@ struct APIKeysStep: View {
     }
 
     var body: some View {
+        if BundledKeys.hasAnyBundled {
+            bundledKeysBody
+        } else {
+            standardBody
+        }
+    }
+
+    private var bundledKeysBody: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("APIs are pre-configured")
+                    .font(.title2.weight(.semibold))
+                Text("This build of Whisperly ships with API keys baked in. You don't need to do anything here — dictation will use those keys.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 14) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Groq + Anthropic ready").font(.headline)
+                    Text("If you'd rather use your own keys later, paste them in Settings → API Keys.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.regularMaterial))
+
+            Spacer(minLength: 0)
+            HStack {
+                Button("Back") { onBack() }
+                Spacer()
+                Button("Continue") { onContinue() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .keyboardShortcut(.return, modifiers: [])
+            }
+        }
+    }
+
+    private var standardBody: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Connect your APIs")

@@ -45,13 +45,29 @@ nonisolated final class KeychainService: Sendable {
         ]
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data, let value = String(data: data, encoding: .utf8) else {
-            if status != errSecItemNotFound {
-                logger.error("SecItemCopyMatching failed for \(key, privacy: .public): \(status)")
-            }
+        if status == errSecSuccess, let data = item as? Data, let value = String(data: data, encoding: .utf8) {
+            return value
+        }
+        if status != errSecItemNotFound {
+            logger.error("SecItemCopyMatching failed for \(key, privacy: .public): \(status)")
+        }
+        // Fall back to a bundled key (set at archive time for family-share
+        // builds — see BundledKeys.swift). nil for normal dev builds.
+        return bundledFallback(for: key)
+    }
+
+    /// Returns a build-bundled key when no Keychain entry exists. User-saved
+    /// Keychain entries always take precedence so a family member can swap in
+    /// their own key without rebuilding.
+    private func bundledFallback(for key: String) -> String? {
+        switch key {
+        case Self.groqAPIKey:
+            return BundledKeys.groqAPIKey?.isEmpty == false ? BundledKeys.groqAPIKey : nil
+        case Self.anthropicAPIKey:
+            return BundledKeys.anthropicAPIKey?.isEmpty == false ? BundledKeys.anthropicAPIKey : nil
+        default:
             return nil
         }
-        return value
     }
 
     func delete(key: String) {
