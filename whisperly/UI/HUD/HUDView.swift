@@ -18,6 +18,11 @@ struct HUDView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .truncationMode(.tail)
+                } else if let mode = appState.modeDisplay {
+                    Text(mode)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.accentColor)
+                        .lineLimit(1)
                 }
             }
             Spacer(minLength: 0)

@@ -13,9 +13,10 @@ struct whisperlyApp: App {
     private let context: ContextDetector
     private let inserter: TextInserter
     private let sound: SoundPlayer
+    private let history: HistoryStore?
     private let hudController: HUDController
 
-    private let logger = Logger(subsystem: "com.karim.whisperly", category: "App")
+    private static let logger = Logger(subsystem: "com.karim.whisperly", category: "App")
 
     init() {
         let keychain = KeychainService()
@@ -28,6 +29,16 @@ struct whisperlyApp: App {
         let inserter = TextInserter()
         let sound = SoundPlayer(config: config)
 
+        // History is best-effort: if the SQLite file can't open we still want
+        // dictation to work. Log and continue.
+        let history: HistoryStore?
+        do {
+            history = try HistoryStore()
+        } catch {
+            Self.logger.error("HistoryStore init failed; history disabled this session: \(error.localizedDescription, privacy: .public)")
+            history = nil
+        }
+
         self.hotkey = hotkey
         self.recorder = recorder
         self.groq = groq
@@ -35,6 +46,7 @@ struct whisperlyApp: App {
         self.context = context
         self.inserter = inserter
         self.sound = sound
+        self.history = history
 
         let state = AppState(
             hotkey: hotkey,
@@ -43,7 +55,9 @@ struct whisperlyApp: App {
             haiku: haiku,
             context: context,
             inserter: inserter,
-            sound: sound
+            sound: sound,
+            history: history,
+            config: config
         )
         self.hudController = HUDController(appState: state, config: config)
         _appState = StateObject(wrappedValue: state)
@@ -58,8 +72,24 @@ struct whisperlyApp: App {
         .menuBarExtraStyle(.menu)
 
         Settings {
-            SettingsRoot()
+            SettingsRoot(historyStore: history)
         }
+
+        Window("Whisperly History", id: "history") {
+            if let history {
+                HistoryWindowView(store: history, inserter: inserter)
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.orange)
+                    Text("History storage failed to open.")
+                    Text("Check Console for details.").font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(width: 360, height: 200)
+            }
+        }
+        .windowResizability(.contentSize)
     }
 
     private func iconName(for phase: AppState.Phase) -> String {
@@ -76,6 +106,7 @@ struct whisperlyApp: App {
 private struct MenuBarContent: View {
     @ObservedObject var appState: AppState
     let hudController: HUDController
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Group {
@@ -83,6 +114,11 @@ private struct MenuBarContent: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Divider()
+            Button("Show History…") {
+                openWindow(id: "history")
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            .keyboardShortcut("y", modifiers: [.command])
             SettingsLink {
                 Text("Settings…")
             }
@@ -94,9 +130,11 @@ private struct MenuBarContent: View {
             .keyboardShortcut("q", modifiers: [.command])
         }
         .task {
-            // Bootstrap once on first appearance: start the hotkey monitor and HUD.
+            // Bootstrap once on first appearance: start the hotkey monitor and HUD,
+            // and prompt for Accessibility if it hasn't been granted yet.
             appState.bootstrap()
             hudController.start()
+            _ = AccessibilityChecker.ensureTrusted(promptIfNeeded: true)
         }
     }
 

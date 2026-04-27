@@ -61,6 +61,8 @@ final class HotkeyConfig: ObservableObject {
         static let playStartSound = "hotkey.playStartSound"
         static let playStopSound = "hotkey.playStopSound"
         static let showHUD = "hotkey.showHUD"
+        static let historyEnabled = "history.enabled"
+        static let historyRetentionDays = "history.retentionDays"
     }
 
     @Published var mode: Mode {
@@ -83,6 +85,14 @@ final class HotkeyConfig: ObservableObject {
         didSet { UserDefaults.standard.set(showHUD, forKey: Defaults.showHUD) }
     }
 
+    @Published var historyEnabled: Bool {
+        didSet { UserDefaults.standard.set(historyEnabled, forKey: Defaults.historyEnabled) }
+    }
+
+    @Published var historyRetentionDays: Int {
+        didSet { UserDefaults.standard.set(historyRetentionDays, forKey: Defaults.historyRetentionDays) }
+    }
+
     private init() {
         let d = UserDefaults.standard
         self.mode = Mode(rawValue: d.string(forKey: Defaults.mode) ?? "") ?? .hold
@@ -93,5 +103,8 @@ final class HotkeyConfig: ObservableObject {
         self.playStartSound = (d.object(forKey: Defaults.playStartSound) as? Bool) ?? true
         self.playStopSound = (d.object(forKey: Defaults.playStopSound) as? Bool) ?? false
         self.showHUD = (d.object(forKey: Defaults.showHUD) as? Bool) ?? true
+        self.historyEnabled = (d.object(forKey: Defaults.historyEnabled) as? Bool) ?? true
+        let storedRetention = d.object(forKey: Defaults.historyRetentionDays) as? Int
+        self.historyRetentionDays = storedRetention ?? 90
     }
 }

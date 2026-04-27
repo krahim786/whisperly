@@ -16,6 +16,13 @@ import os
 final class TextInserter {
     private let logger = Logger(subsystem: "com.karim.whisperly", category: "TextInserter")
 
+    /// Symmetric alias for use sites that semantically replace a selection.
+    /// The actual mechanism is identical: writing to the pasteboard and
+    /// posting ⌘V — when text is currently selected, the paste replaces it.
+    func replaceSelection(with text: String) async {
+        await paste(text)
+    }
+
     func paste(_ text: String) async {
         guard !text.isEmpty else { return }
 
