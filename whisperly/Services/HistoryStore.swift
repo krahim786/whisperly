@@ -246,4 +246,31 @@ nonisolated final class HistoryStore: @unchecked Sendable {
             }
         }
     }
+
+    // MARK: - Analytics
+
+    /// Lightweight read of every entry's analytics-relevant fields. The full
+    /// cleaned/raw text isn't needed for usage stats, so we return a slimmer
+    /// projection instead of materializing every HistoryEntry.
+    func analyticsRows() async throws -> [AnalyticsRow] {
+        try await dbQueue.read { db in
+            try Row
+                .fetchAll(db, sql: "SELECT timestamp, target_app, word_count, audio_duration_seconds FROM history")
+                .map { row in
+                    AnalyticsRow(
+                        timestamp: row["timestamp"],
+                        targetApp: row["target_app"],
+                        wordCount: row["word_count"],
+                        audioDurationSeconds: row["audio_duration_seconds"]
+                    )
+                }
+        }
+    }
+
+    nonisolated struct AnalyticsRow: Sendable {
+        let timestamp: Date
+        let targetApp: String?
+        let wordCount: Int?
+        let audioDurationSeconds: Double?
+    }
 }

@@ -42,6 +42,39 @@ nonisolated final class HaikuClient: Sendable {
         self.session = URLSession(configuration: config)
     }
 
+    /// Cheap auth check used by onboarding. Sends a 1-token "ping" message
+    /// just to confirm the key is valid; returns true on 200.
+    func validate(apiKey: String) async throws -> Bool {
+        let body: [String: Any] = [
+            "model": model,
+            "max_tokens": 1,
+            "messages": [["role": "user", "content": "ping"]],
+        ]
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue(anthropicVersion, forHTTPHeaderField: "anthropic-version")
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw HaikuClientError.network(error)
+        }
+        guard let http = response as? HTTPURLResponse else { throw HaikuClientError.decoding }
+        switch http.statusCode {
+        case 200: return true
+        case 401, 403: throw HaikuClientError.unauthorized
+        case 429: throw HaikuClientError.rateLimited
+        default:
+            let bodyStr = String(data: data, encoding: .utf8) ?? ""
+            throw HaikuClientError.server(http.statusCode, bodyStr)
+        }
+    }
+
     func cleanup(transcript: String, appName: String, dictionaryJSON: String = "[]") async throws -> String {
         let systemPrompt = DictationPrompt.system(dictionaryJSON: dictionaryJSON)
         let userMessage = "Target app: \(appName)\nRaw transcript: \(transcript)"
