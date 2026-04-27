@@ -99,6 +99,24 @@ nonisolated final class HistoryStore: @unchecked Sendable {
         return saved
     }
 
+    /// Update the cleaned text for a single entry. Returns the original cleaned
+    /// text from before the update so the caller can run a diff (e.g. for the
+    /// dictionary learner).
+    @discardableResult
+    func updateCleanedText(id: String, newCleanedText: String) async throws -> String? {
+        let original: String? = try await dbQueue.write { db -> String? in
+            guard var entry = try HistoryEntry.filter(HistoryEntry.Columns.id == id).fetchOne(db) else {
+                return nil
+            }
+            let before = entry.cleanedText
+            entry.cleanedText = newCleanedText
+            try entry.update(db)
+            return before
+        }
+        if original != nil { changeSubject.send() }
+        return original
+    }
+
     func delete(id: String) async throws {
         let deleted = try await dbQueue.write { db -> Int in
             try HistoryEntry.filter(HistoryEntry.Columns.id == id).deleteAll(db)

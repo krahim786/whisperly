@@ -17,8 +17,8 @@ final class AppState: ObservableObject {
         case error(String)
     }
 
-    /// Internal mode for the in-flight cycle. Captured at hotkey press
-    /// (selection must be read synchronously before recording starts).
+    /// Internal mode for the in-flight cycle. Captured at hotkey press for
+    /// `.edit`; resolved post-transcription for snippet vs command vs dictation.
     private enum DictationMode: Equatable {
         case dictation
         case edit(selection: String)
@@ -26,17 +26,11 @@ final class AppState: ObservableObject {
 
     @Published private(set) var phase: Phase = .idle
 
-    /// Sliding window of the most recent RMS values published by the recorder.
-    /// HUD reads this directly. Reset on entering `.recording`.
     @Published private(set) var amplitudeHistory: [Float] = []
     private let amplitudeHistorySize = 24
 
-    /// Optional subtitle the HUD shows under the state label. Currently used
-    /// to indicate "Editing selection" so the user knows their hotkey
-    /// captured a selection and routed to edit mode.
     @Published private(set) var modeDisplay: String?
 
-    /// Brief tap (< 200ms) is treated as accidental — we abandon the cycle.
     private let minimumHoldDuration: TimeInterval = 0.2
 
     private let logger = Logger(subsystem: "com.karim.whisperly", category: "AppState")
@@ -49,13 +43,14 @@ final class AppState: ObservableObject {
     private let inserter: TextInserter
     private let sound: SoundPlayer
     private let history: HistoryStore?
+    private let snippets: SnippetStore
+    private let dictionary: DictionaryStore
     private let config: HotkeyConfig
 
     private var cancellables = Set<AnyCancellable>()
     private var pressedAt: Date?
     private var inFlightTask: Task<Void, Never>?
 
-    /// Mode for the cycle currently in flight. Set on press, consumed on pipeline completion.
     private var currentMode: DictationMode = .dictation
 
     init(
@@ -67,6 +62,8 @@ final class AppState: ObservableObject {
         inserter: TextInserter,
         sound: SoundPlayer,
         history: HistoryStore?,
+        snippets: SnippetStore,
+        dictionary: DictionaryStore,
         config: HotkeyConfig
     ) {
         self.hotkey = hotkey
@@ -77,6 +74,8 @@ final class AppState: ObservableObject {
         self.inserter = inserter
         self.sound = sound
         self.history = history
+        self.snippets = snippets
+        self.dictionary = dictionary
         self.config = config
 
         hotkey.events
@@ -92,8 +91,6 @@ final class AppState: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Recorder amplitudes arrive on the audio thread; hop to main and
-        // append to the sliding window.
         recorder.amplitudes
             .receive(on: DispatchQueue.main)
             .sink { [weak self] rms in
@@ -108,8 +105,6 @@ final class AppState: ObservableObject {
 
     func bootstrap() {
         hotkey.start()
-        // One-shot retention sweep on launch — drops anything past the
-        // user's configured retention window. Cheap with the timestamp index.
         if let history, config.historyEnabled {
             Task.detached { [history, retention = config.historyRetentionDays] in
                 _ = try? await history.enforceRetention(retentionDays: retention)
@@ -125,8 +120,6 @@ final class AppState: ObservableObject {
             return
         }
 
-        // Mode detection MUST run synchronously before we start recording —
-        // by the time the user finishes speaking, the selection may be lost.
         let selection = context.getSelectedText()
         if let selection {
             currentMode = .edit(selection: selection)
@@ -192,10 +185,11 @@ final class AppState: ObservableObject {
             return
         }
 
-        // 2. Groq transcribe
+        // 2. Groq transcribe (with dictionary biasing terms)
+        let biasingTerms = dictionary.topTermsForBiasing(limit: 20)
         let transcript: String
         do {
-            transcript = try await groq.transcribe(audioURL: audioURL)
+            transcript = try await groq.transcribe(audioURL: audioURL, biasingTerms: biasingTerms)
         } catch {
             try? FileManager.default.removeItem(at: audioURL)
             flashError(error.localizedDescription)
@@ -210,7 +204,32 @@ final class AppState: ObservableObject {
             return
         }
 
-        // 3. Cleanup or edit
+        // 3. Resolve mode and produce final text.
+        //    Edit mode is locked in at press time and bypasses snippet/command checks.
+        //    Otherwise: snippet expansion (no LLM) → command mode → dictation cleanup.
+        let dictionaryJSON = dictionary.jsonForPrompt()
+
+        // 3a. Snippet bypass (only when not editing a selection).
+        if case .dictation = cycleMode,
+           let snippet = SnippetMatcher.match(transcript: transcript, in: snippets.snippets) {
+            logger.info("Snippet matched: \(snippet.trigger, privacy: .public) → expansion (\(snippet.expansion.count, privacy: .public) chars)")
+            phase = .pasting
+            await inserter.paste(snippet.expansion)
+            phase = .idle
+            modeDisplay = nil
+            snippets.recordUse(id: snippet.id)
+            await logHistory(
+                mode: .dictation,
+                appName: appName,
+                rawTranscript: transcript,
+                cleanedText: snippet.expansion,
+                selectionInput: nil,
+                holdDuration: holdDuration
+            )
+            return
+        }
+
+        // 3b. Haiku call (cleanup / edit / command).
         phase = .cleaning
         let cleaned: String
         let historyMode: HistoryEntry.Mode
@@ -218,17 +237,21 @@ final class AppState: ObservableObject {
         do {
             switch cycleMode {
             case .dictation:
-                cleaned = try await haiku.cleanup(transcript: transcript, appName: appName)
-                historyMode = .dictation
-                selectionForLog = nil
+                if CommandPrompt.looksLikeCommand(transcript) {
+                    cleaned = try await haiku.command(transcript: transcript, appName: appName, dictionaryJSON: dictionaryJSON)
+                    historyMode = .command
+                    selectionForLog = nil
+                } else {
+                    cleaned = try await haiku.cleanup(transcript: transcript, appName: appName, dictionaryJSON: dictionaryJSON)
+                    historyMode = .dictation
+                    selectionForLog = nil
+                }
             case .edit(let selection):
-                cleaned = try await haiku.editSelection(selection: selection, instruction: transcript, appName: appName)
+                cleaned = try await haiku.editSelection(selection: selection, instruction: transcript, appName: appName, dictionaryJSON: dictionaryJSON)
                 historyMode = .edit
                 selectionForLog = selection
             }
         } catch {
-            // Fallback: paste the raw transcript (or, in edit mode, the original
-            // selection unchanged) so the user always gets a usable result.
             logger.error("Haiku failed; falling back. Error: \(error.localizedDescription, privacy: .public)")
             phase = .pasting
             switch cycleMode {
@@ -253,20 +276,37 @@ final class AppState: ObservableObject {
         phase = .idle
         modeDisplay = nil
 
-        // 5. Persist to history off the hot path so we don't keep the user waiting.
-        if let history, config.historyEnabled {
-            let entry = HistoryEntry(
-                mode: historyMode,
-                targetApp: appName,
-                rawTranscript: transcript,
-                cleanedText: cleaned,
-                selectionInput: selectionForLog,
-                audioDurationSeconds: holdDuration,
-                wordCount: cleaned.split { $0.isWhitespace || $0.isNewline }.count
-            )
-            Task.detached { [history] in
-                _ = try? await history.insert(entry)
-            }
+        // 5. History (off the hot path)
+        await logHistory(
+            mode: historyMode,
+            appName: appName,
+            rawTranscript: transcript,
+            cleanedText: cleaned,
+            selectionInput: selectionForLog,
+            holdDuration: holdDuration
+        )
+    }
+
+    private func logHistory(
+        mode: HistoryEntry.Mode,
+        appName: String,
+        rawTranscript: String,
+        cleanedText: String,
+        selectionInput: String?,
+        holdDuration: TimeInterval
+    ) async {
+        guard let history, config.historyEnabled else { return }
+        let entry = HistoryEntry(
+            mode: mode,
+            targetApp: appName,
+            rawTranscript: rawTranscript,
+            cleanedText: cleanedText,
+            selectionInput: selectionInput,
+            audioDurationSeconds: holdDuration,
+            wordCount: cleanedText.split { $0.isWhitespace || $0.isNewline }.count
+        )
+        Task.detached { [history] in
+            _ = try? await history.insert(entry)
         }
     }
 

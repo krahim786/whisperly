@@ -3,11 +3,12 @@ import SwiftUI
 struct HistoryWindowView: View {
     @StateObject private var vm: HistoryViewModel
 
-    init(store: HistoryStore, inserter: TextInserter) {
-        _vm = StateObject(wrappedValue: HistoryViewModel(store: store, inserter: inserter))
+    init(store: HistoryStore, inserter: TextInserter, dictionary: DictionaryStore?) {
+        _vm = StateObject(wrappedValue: HistoryViewModel(store: store, inserter: inserter, dictionary: dictionary))
     }
 
     @State private var selection: HistoryEntry.ID?
+    @State private var entryBeingEdited: HistoryEntry?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,6 +23,14 @@ struct HistoryWindowView: View {
             Button("OK") { vm.errorMessage = nil }
         } message: { msg in
             Text(msg)
+        }
+        .sheet(item: $entryBeingEdited) { entry in
+            HistoryEditSheet(entry: entry) { newText in
+                vm.updateCleanedText(entry, to: newText)
+                entryBeingEdited = nil
+            } cancel: {
+                entryBeingEdited = nil
+            }
         }
     }
 
@@ -86,11 +95,11 @@ struct HistoryWindowView: View {
                 if let id = ids.first, let entry = vm.entries.first(where: { $0.id == id }) {
                     Button("Copy") { vm.copy(entry) }
                     Button("Re-paste at cursor") { Task { await vm.paste(entry) } }
+                    Button("Edit cleaned text…") { entryBeingEdited = entry }
                     Divider()
                     Button("Delete", role: .destructive) { vm.delete(entry) }
                 }
             } primaryAction: { ids in
-                // Double-click action.
                 if let id = ids.first, let entry = vm.entries.first(where: { $0.id == id }) {
                     Task { await vm.paste(entry) }
                 }
@@ -140,5 +149,46 @@ private struct ModeBadge: View {
         case .edit: return .orange
         case .command: return .purple
         }
+    }
+}
+
+private struct HistoryEditSheet: View {
+    let entry: HistoryEntry
+    let save: (String) -> Void
+    let cancel: () -> Void
+
+    @State private var draft: String
+
+    init(entry: HistoryEntry, save: @escaping (String) -> Void, cancel: @escaping () -> Void) {
+        self.entry = entry
+        self.save = save
+        self.cancel = cancel
+        _draft = State(initialValue: entry.cleanedText)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Edit cleaned text")
+                .font(.headline)
+            Text("Edits help Whisperly learn your vocabulary — new words you add to the cleaned text become dictionary suggestions after a few corrections.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextEditor(text: $draft)
+                .font(.body)
+                .border(.separator)
+                .frame(minWidth: 480, minHeight: 220)
+
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { cancel() }
+                Button("Save") { save(draft) }
+                    .keyboardShortcut(.return, modifiers: [.command])
+                    .disabled(draft == entry.cleanedText)
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 520)
     }
 }

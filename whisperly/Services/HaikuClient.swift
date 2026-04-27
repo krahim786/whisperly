@@ -42,8 +42,8 @@ nonisolated final class HaikuClient: Sendable {
         self.session = URLSession(configuration: config)
     }
 
-    func cleanup(transcript: String, appName: String) async throws -> String {
-        let systemPrompt = DictationPrompt.system()
+    func cleanup(transcript: String, appName: String, dictionaryJSON: String = "[]") async throws -> String {
+        let systemPrompt = DictationPrompt.system(dictionaryJSON: dictionaryJSON)
         let userMessage = "Target app: \(appName)\nRaw transcript: \(transcript)"
         return try await complete(system: systemPrompt, user: userMessage, label: "cleanup")
     }
@@ -51,8 +51,8 @@ nonisolated final class HaikuClient: Sendable {
     /// Edit-mode call: rewrite `selection` according to the spoken `instruction`.
     /// Same prompt-cached `system` block convention as `cleanup` so the prompt
     /// prefix stays warm across modes.
-    func editSelection(selection: String, instruction: String, appName: String) async throws -> String {
-        let systemPrompt = EditPrompt.system()
+    func editSelection(selection: String, instruction: String, appName: String, dictionaryJSON: String = "[]") async throws -> String {
+        let systemPrompt = EditPrompt.system(dictionaryJSON: dictionaryJSON)
         let userMessage = """
             Target app: \(appName)
             Selected text:
@@ -62,6 +62,13 @@ nonisolated final class HaikuClient: Sendable {
             Spoken instruction: \(instruction)
             """
         return try await complete(system: systemPrompt, user: userMessage, label: "edit")
+    }
+
+    /// Command mode: format `transcript` according to the verb prefix the user spoke.
+    func command(transcript: String, appName: String, dictionaryJSON: String = "[]") async throws -> String {
+        let systemPrompt = CommandPrompt.system(dictionaryJSON: dictionaryJSON)
+        let userMessage = "Target app: \(appName)\nSpoken: \(transcript)"
+        return try await complete(system: systemPrompt, user: userMessage, label: "command")
     }
 
     // MARK: - Shared completion path
