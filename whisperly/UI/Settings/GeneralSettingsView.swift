@@ -48,6 +48,23 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            Section("Diagnostics") {
+                Toggle("Write verbose logs to ~/Library/Logs/Whisperly/", isOn: $config.verboseLogging)
+                HStack {
+                    Button("Reveal log folder in Finder") {
+                        if let folder = FileLogger.shared.logFolderURL {
+                            NSWorkspace.shared.activateFileViewerSelecting([folder])
+                        }
+                    }
+                    .disabled(FileLogger.shared.logFolderURL == nil)
+                    Spacer()
+                }
+                Text("Verbose logs include hotkey events, mode resolution, network results, and cache hit counts. Useful for filing issues — sensitive contents (API keys, transcripts) are never written.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 480, height: 460)
