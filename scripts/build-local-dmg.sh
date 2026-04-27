@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+#
+# build-local-dmg.sh — build a Whisperly.dmg for personal / family use,
+# without an Apple Developer Program membership.
+#
+# This produces an ad-hoc signed app (codesign identity "-"). The DMG is
+# real and installable, but Gatekeeper will warn on first launch on each
+# receiving Mac. See the "First-launch on the receiving Mac" instructions
+# printed at the end of the build.
+#
+# No env vars required. No notarytool, no certs, no Apple ID.
+
+set -euo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
+
+PROJECT="whisperly.xcodeproj"
+SCHEME="whisperly"
+CONFIGURATION="Release"
+BUILD_DIR="$PROJECT_ROOT/build"
+ARCHIVE_PATH="$BUILD_DIR/whisperly-local.xcarchive"
+EXPORT_DIR="$BUILD_DIR/export-local"
+APP_PATH="$EXPORT_DIR/whisperly.app"
+DMG_PATH="$BUILD_DIR/Whisperly-local.dmg"
+DMG_STAGING="$BUILD_DIR/dmg-staging-local"
+
+mkdir -p "$BUILD_DIR"
+rm -rf "$ARCHIVE_PATH" "$EXPORT_DIR" "$DMG_STAGING" "$DMG_PATH"
+
+# --- 1. archive (Release config, ad-hoc signed) ---
+
+echo "▶︎ Archiving (ad-hoc signed)..."
+xcodebuild \
+  -project "$PROJECT" \
+  -scheme "$SCHEME" \
+  -configuration "$CONFIGURATION" \
+  -destination "generic/platform=macOS" \
+  -archivePath "$ARCHIVE_PATH" \
+  CODE_SIGN_STYLE=Manual \
+  CODE_SIGN_IDENTITY="-" \
+  DEVELOPMENT_TEAM="" \
+  CODE_SIGNING_REQUIRED=YES \
+  CODE_SIGNING_ALLOWED=YES \
+  archive
+
+# --- 2. extract the .app from the archive ---
+# We don't use `xcodebuild -exportArchive` here because that path requires
+# an ExportOptions.plist with a `method` like "developer-id", which we're
+# explicitly skipping. The .app inside the .xcarchive is already complete.
+
+APP_IN_ARCHIVE="$ARCHIVE_PATH/Products/Applications/whisperly.app"
+if [ ! -d "$APP_IN_ARCHIVE" ]; then
+  echo "✗ Archive did not contain whisperly.app at the expected path." >&2
+  exit 1
+fi
+
+mkdir -p "$EXPORT_DIR"
+cp -R "$APP_IN_ARCHIVE" "$EXPORT_DIR/"
+
+# --- 3. verify ad-hoc signature ---
+
+echo "▶︎ Verifying signature..."
+codesign --verify --verbose=2 "$APP_PATH" || true
+
+# --- 4. build the DMG ---
+
+echo "▶︎ Building DMG..."
+mkdir -p "$DMG_STAGING"
+cp -R "$APP_PATH" "$DMG_STAGING/"
+ln -s /Applications "$DMG_STAGING/Applications"
+
+hdiutil create \
+  -volname "Whisperly" \
+  -srcfolder "$DMG_STAGING" \
+  -ov \
+  -format UDZO \
+  -fs HFS+ \
+  "$DMG_PATH"
+
+# --- done ---
+
+cat <<EOF
+
+✓ $DMG_PATH
+
+────────────────────────────────────────────────────────────────────
+First-launch instructions for the receiving Mac
+────────────────────────────────────────────────────────────────────
+
+Because this app isn't signed with an Apple Developer ID, macOS Gatekeeper
+will refuse to open it the first time. Pick whichever of the two options
+feels easier — both are completely safe for an app you built yourself.
+
+Option A — System Settings (one click, no Terminal):
+  1. Mount the DMG and drag Whisperly.app to /Applications.
+  2. Try to open Whisperly. macOS will show "Whisperly cannot be opened
+     because Apple cannot check it for malicious software."
+  3. Click "Done" / "Cancel" on that dialog.
+  4. Open System Settings → Privacy & Security.
+  5. Scroll down — there's a line: "Whisperly was blocked from use
+     because it is not from an identified developer."
+  6. Click "Open Anyway" next to it. Confirm with your password / Touch ID.
+  7. Whisperly opens. macOS remembers the decision; next launches are fine.
+
+Option B — Terminal (one command, instant):
+  After dragging Whisperly.app to /Applications, open Terminal and run:
+
+      xattr -cr /Applications/Whisperly.app
+
+  That strips the macOS "downloaded from the internet" quarantine flag.
+  Then double-click Whisperly normally.
+
+────────────────────────────────────────────────────────────────────
+EOF
+
+ls -lh "$DMG_PATH"
