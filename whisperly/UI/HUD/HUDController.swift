@@ -13,7 +13,7 @@ final class HUDController {
     private var hosting: NSHostingView<HUDView>?
     private var cancellables = Set<AnyCancellable>()
 
-    private let panelSize = NSSize(width: 280, height: 64)
+    private let panelSize = NSSize(width: 360, height: 80)
     private let edgeMargin: CGFloat = 24
 
     init(appState: AppState, config: HotkeyConfig) {
