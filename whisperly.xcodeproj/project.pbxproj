@@ -29,9 +29,22 @@
 		19115FFA2F9FDE480041704F /* whisperlyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = whisperlyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1911600E2F9FE0AF0041704F /* Exceptions for "whisperly" folder in "whisperly" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 19115FE22F9FDE470041704F /* whisperly */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		19115FE52F9FDE470041704F /* whisperly */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				1911600E2F9FE0AF0041704F /* Exceptions for "whisperly" folder in "whisperly" target */,
+			);
 			path = whisperly;
 			sourceTree = "<group>";
 		};
@@ -409,6 +422,7 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = whisperly/Info.plist;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Whisperly uses Accessibility to detect your active app so it can format dictation appropriately and paste at your cursor.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -456,6 +470,7 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PHOTO_LIBRARY = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = whisperly/Info.plist;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Whisperly uses Accessibility to detect your active app so it can format dictation appropriately and paste at your cursor.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
