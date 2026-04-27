@@ -13,10 +13,22 @@ struct AboutView: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            Image(systemName: "mic.badge.plus")
-                .font(.system(size: 64, weight: .light))
-                .foregroundStyle(.tint)
-                .padding(.top, 8)
+            // Uses the app's bundled icon (the one in Assets.xcassets/AppIcon).
+            // Falls back to an SF Symbol if the icon image isn't available
+            // (e.g. running unbundled in a SwiftUI preview).
+            Group {
+                if let appIcon = NSApp?.applicationIconImage {
+                    Image(nsImage: appIcon)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 96, height: 96)
+                } else {
+                    Image(systemName: "mic.badge.plus")
+                        .font(.system(size: 64, weight: .light))
+                        .foregroundStyle(.tint)
+                }
+            }
+            .padding(.top, 8)
 
             VStack(spacing: 4) {
                 Text("Whisperly")
