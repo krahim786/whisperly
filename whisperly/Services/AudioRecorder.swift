@@ -57,6 +57,7 @@ final class AudioRecorder: @unchecked Sendable {
     // Max recording length safeguard. Engine auto-stops; the consumer can still
     // call stopRecording() afterward to read the URL.
     private let maxRecordingSeconds: TimeInterval = 60
+    private var maxLengthTask: Task<Void, Never>?
 
     // Amplitude publishing — RMS values 0...1.
     nonisolated private let amplitudeSubject = PassthroughSubject<Float, Never>()
@@ -289,6 +290,11 @@ final class AudioRecorder: @unchecked Sendable {
     }
 
     private func endRecordingOnQueue() {
+        // Cancel any pending max-length guard so it can't fire during a
+        // subsequent recording.
+        maxLengthTask?.cancel()
+        maxLengthTask = nil
+
         if engine.isRunning {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
@@ -306,9 +312,14 @@ final class AudioRecorder: @unchecked Sendable {
     }
 
     private func scheduleMaxLengthGuard() {
+        // Cancel any prior guard so a stale task from an earlier (early-released)
+        // recording can't fire during this new one and stop the engine
+        // prematurely.
+        maxLengthTask?.cancel()
         let limit = maxRecordingSeconds
-        Task { [weak self] in
+        maxLengthTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(limit * 1_000_000_000))
+            if Task.isCancelled { return }
             guard let self else { return }
             self.queue.async { [weak self] in
                 guard let self, self.isRecording else { return }
