@@ -40,6 +40,33 @@ nonisolated final class GroqClient: Sendable {
         self.session = URLSession(configuration: config)
     }
 
+    /// Cheap auth check used by onboarding before letting the user proceed.
+    /// Hits `/v1/models` with the supplied key — returns true on 200, throws
+    /// `unauthorized` on 401, or `network` for transport errors.
+    func validate(apiKey: String) async throws -> Bool {
+        let url = URL(string: "https://api.groq.com/openai/v1/models")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw GroqClientError.network(error)
+        }
+        guard let http = response as? HTTPURLResponse else { throw GroqClientError.decoding }
+        switch http.statusCode {
+        case 200: return true
+        case 401, 403: throw GroqClientError.unauthorized
+        case 429: throw GroqClientError.rateLimited
+        default:
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw GroqClientError.server(http.statusCode, body)
+        }
+    }
+
     /// Transcribe an audio file. `biasingTerms` are passed as Whisper's `prompt`
     /// parameter to bias the STT output toward the user's vocabulary — proper
     /// nouns, product names, etc. Whisper accepts up to 244 prompt tokens; we
