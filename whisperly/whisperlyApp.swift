@@ -5,6 +5,8 @@ import os
 struct whisperlyApp: App {
     @StateObject private var appState: AppState
     @StateObject private var config = HotkeyConfig.shared
+    @StateObject private var snippetStore: SnippetStore
+    @StateObject private var dictionaryStore: DictionaryStore
 
     private let hotkey: HotkeyManager
     private let recorder: AudioRecorder
@@ -28,9 +30,9 @@ struct whisperlyApp: App {
         let context = ContextDetector()
         let inserter = TextInserter()
         let sound = SoundPlayer(config: config)
+        let snippets = SnippetStore()
+        let dictionary = DictionaryStore()
 
-        // History is best-effort: if the SQLite file can't open we still want
-        // dictation to work. Log and continue.
         let history: HistoryStore?
         do {
             history = try HistoryStore()
@@ -57,27 +59,35 @@ struct whisperlyApp: App {
             inserter: inserter,
             sound: sound,
             history: history,
+            snippets: snippets,
+            dictionary: dictionary,
             config: config
         )
         self.hudController = HUDController(appState: state, config: config)
         _appState = StateObject(wrappedValue: state)
+        _snippetStore = StateObject(wrappedValue: snippets)
+        _dictionaryStore = StateObject(wrappedValue: dictionary)
     }
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarContent(appState: appState, hudController: hudController)
+            MenuBarContent(appState: appState, hudController: hudController, dictionaryStore: dictionaryStore)
         } label: {
             Image(systemName: iconName(for: appState.phase))
         }
         .menuBarExtraStyle(.menu)
 
         Settings {
-            SettingsRoot(historyStore: history)
+            SettingsRoot(
+                historyStore: history,
+                snippetStore: snippetStore,
+                dictionaryStore: dictionaryStore
+            )
         }
 
         Window("Whisperly History", id: "history") {
             if let history {
-                HistoryWindowView(store: history, inserter: inserter)
+                HistoryWindowView(store: history, inserter: inserter, dictionary: dictionaryStore)
             } else {
                 VStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle")
@@ -106,6 +116,7 @@ struct whisperlyApp: App {
 private struct MenuBarContent: View {
     @ObservedObject var appState: AppState
     let hudController: HUDController
+    @ObservedObject var dictionaryStore: DictionaryStore
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -113,6 +124,11 @@ private struct MenuBarContent: View {
             Text(statusText(appState.phase))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if dictionaryStore.pendingSuggestionCount > 0 {
+                Text("\(dictionaryStore.pendingSuggestionCount) dictionary suggestion\(dictionaryStore.pendingSuggestionCount == 1 ? "" : "s")")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
             Divider()
             Button("Show History…") {
                 openWindow(id: "history")
@@ -130,8 +146,6 @@ private struct MenuBarContent: View {
             .keyboardShortcut("q", modifiers: [.command])
         }
         .task {
-            // Bootstrap once on first appearance: start the hotkey monitor and HUD,
-            // and prompt for Accessibility if it hasn't been granted yet.
             appState.bootstrap()
             hudController.start()
             _ = AccessibilityChecker.ensureTrusted(promptIfNeeded: true)

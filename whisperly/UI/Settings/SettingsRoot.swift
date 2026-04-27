@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SettingsRoot: View {
     let historyStore: HistoryStore?
+    let snippetStore: SnippetStore
+    let dictionaryStore: DictionaryStore
 
     var body: some View {
         TabView {
@@ -9,11 +11,15 @@ struct SettingsRoot: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             HotkeySettingsView()
                 .tabItem { Label("Hotkey", systemImage: "keyboard") }
+            SnippetsSettingsView(store: snippetStore)
+                .tabItem { Label("Snippets", systemImage: "text.append") }
+            DictionarySettingsView(store: dictionaryStore)
+                .tabItem { Label("Dictionary", systemImage: "character.book.closed") }
             HistorySettingsView(store: historyStore)
                 .tabItem { Label("History", systemImage: "clock") }
             APIKeysSettingsView()
                 .tabItem { Label("API Keys", systemImage: "key.fill") }
         }
-        .frame(width: 520, height: 460)
+        .frame(width: 660, height: 500)
     }
 }

@@ -17,14 +17,16 @@ final class HistoryViewModel: ObservableObject {
 
     private let store: HistoryStore
     private let inserter: TextInserter
+    private let dictionary: DictionaryStore?
     private let logger = Logger(subsystem: "com.karim.whisperly", category: "HistoryVM")
 
     private var cancellables = Set<AnyCancellable>()
     private var loadTask: Task<Void, Never>?
 
-    init(store: HistoryStore, inserter: TextInserter) {
+    init(store: HistoryStore, inserter: TextInserter, dictionary: DictionaryStore?) {
         self.store = store
         self.inserter = inserter
+        self.dictionary = dictionary
 
         // Debounced search: re-fetch when the query stabilizes.
         $query
@@ -65,6 +67,30 @@ final class HistoryViewModel: ObservableObject {
         NSApp.hide(nil)
         try? await Task.sleep(nanoseconds: 120_000_000)
         await inserter.paste(entry.cleanedText)
+    }
+
+    /// User edited the cleaned text for an entry. Persist it and run the
+    /// dictionary learner over the diff so any new vocabulary gets surfaced.
+    func updateCleanedText(_ entry: HistoryEntry, to newText: String) {
+        let trimmed = newText
+        guard trimmed != entry.cleanedText else { return }
+        Task { [store, dictionary] in
+            do {
+                if let original = try await store.updateCleanedText(id: entry.id, newCleanedText: trimmed) {
+                    if let dictionary {
+                        await MainActor.run {
+                            DictionaryLearner.observeCorrection(
+                                original: original,
+                                corrected: trimmed,
+                                store: dictionary
+                            )
+                        }
+                    }
+                }
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
+        }
     }
 
     func delete(_ entry: HistoryEntry) {

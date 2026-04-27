@@ -40,7 +40,11 @@ nonisolated final class GroqClient: Sendable {
         self.session = URLSession(configuration: config)
     }
 
-    func transcribe(audioURL: URL) async throws -> String {
+    /// Transcribe an audio file. `biasingTerms` are passed as Whisper's `prompt`
+    /// parameter to bias the STT output toward the user's vocabulary — proper
+    /// nouns, product names, etc. Whisper accepts up to 244 prompt tokens; we
+    /// cap the joined string length defensively at 1024 chars to stay under that.
+    func transcribe(audioURL: URL, biasingTerms: [String] = []) async throws -> String {
         guard let apiKey = keychain.load(key: KeychainService.groqAPIKey), !apiKey.isEmpty else {
             throw GroqClientError.missingAPIKey
         }
@@ -53,7 +57,12 @@ nonisolated final class GroqClient: Sendable {
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.httpBody = makeMultipartBody(boundary: boundary, audioData: audioData, filename: audioURL.lastPathComponent)
+        request.httpBody = makeMultipartBody(
+            boundary: boundary,
+            audioData: audioData,
+            filename: audioURL.lastPathComponent,
+            biasingPrompt: makeBiasingPrompt(from: biasingTerms)
+        )
 
         let start = Date()
         let data: Data
@@ -94,7 +103,7 @@ nonisolated final class GroqClient: Sendable {
         }
     }
 
-    private func makeMultipartBody(boundary: String, audioData: Data, filename: String) -> Data {
+    private func makeMultipartBody(boundary: String, audioData: Data, filename: String, biasingPrompt: String?) -> Data {
         var body = Data()
 
         func appendField(_ name: String, _ value: String) {
@@ -107,6 +116,9 @@ nonisolated final class GroqClient: Sendable {
         appendField("response_format", "json")
         appendField("language", "en")
         appendField("temperature", "0")
+        if let biasingPrompt, !biasingPrompt.isEmpty {
+            appendField("prompt", biasingPrompt)
+        }
 
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
@@ -116,5 +128,17 @@ nonisolated final class GroqClient: Sendable {
 
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
         return body
+    }
+
+    /// Builds Whisper's `prompt` parameter from user vocabulary. Whisper
+    /// interprets this as transcription context, biasing the model toward
+    /// the listed words/spellings. Comma-separated form works well in practice.
+    private func makeBiasingPrompt(from terms: [String]) -> String? {
+        let cleaned = terms
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !cleaned.isEmpty else { return nil }
+        let joined = cleaned.joined(separator: ", ")
+        return joined.count > 1024 ? String(joined.prefix(1024)) : joined
     }
 }
