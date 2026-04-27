@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Foundation
 import os
 
@@ -7,6 +8,7 @@ enum AudioRecorderError: LocalizedError {
     case engineFailure(any Error)
     case noActiveRecording
     case converterUnavailable
+    case noSpeechDetected
 
     var errorDescription: String? {
         switch self {
@@ -14,30 +16,55 @@ enum AudioRecorderError: LocalizedError {
         case .engineFailure(let error): return "Audio engine error: \(error.localizedDescription)"
         case .noActiveRecording: return "No recording in progress."
         case .converterUnavailable: return "Couldn't create audio converter."
+        case .noSpeechDetected: return "No speech detected."
         }
     }
 }
 
 /// Records mic audio to a 16 kHz mono 16-bit PCM WAV file in the temp directory.
 ///
-/// Concurrency: the AVAudioEngine tap callback runs on a non-main, real-time-ish
-/// audio queue. We isolate all mutable state (audio file, converter) to a serial
-/// dispatch queue so it can be safely touched from both the start/stop methods
-/// and the tap callback.
+/// Day 2 additions:
+/// - Per-buffer RMS amplitude is published on `amplitudes` for HUD visualization.
+/// - Voice-activity detection (VAD) trims leading silence: buffers are buffered
+///   in a small ring until the first above-threshold buffer arrives, at which
+///   point the ring is flushed to disk and subsequent buffers stream straight
+///   through. This preserves a small window of pre-speech audio so the speech
+///   onset isn't clipped.
+/// - A safety timer auto-stops the engine after `maxRecordingSeconds`. The
+///   caller can still invoke `stopRecording()` to read the URL; if the engine
+///   already self-stopped, the URL is still valid.
 final class AudioRecorder: @unchecked Sendable {
     private let logger = Logger(subsystem: "com.karim.whisperly", category: "AudioRecorder")
 
-    // Audio engine is owned by this class. The input node tap is installed once
-    // per recording cycle and removed on stop.
     private let engine = AVAudioEngine()
 
-    // Serial queue protects mutable state below.
     private let queue = DispatchQueue(label: "com.karim.whisperly.audio")
     private var audioFile: AVAudioFile?
     private var converter: AVAudioConverter?
     private var processingFormat: AVAudioFormat?
     private var currentURL: URL?
     private var isRecording = false
+
+    // VAD state.
+    private let vadThresholdRMS: Float = 0.012      // ~ -38 dBFS
+    private let vadRingCapacity = 8                 // ~80–160 ms of pre-roll depending on buffer size
+    private let vadTrailingSilenceSeconds: TimeInterval = 2.5
+    private var vadHasFlushed = false
+    private var vadRing: [AVAudioPCMBuffer] = []
+    private var receivedAnySpeech = false
+    private var lastSpeechAt: Date?
+
+    // Max recording length safeguard. Engine auto-stops; the consumer can still
+    // call stopRecording() afterward to read the URL.
+    private let maxRecordingSeconds: TimeInterval = 60
+
+    // Amplitude publishing — RMS values 0...1.
+    nonisolated private let amplitudeSubject = PassthroughSubject<Float, Never>()
+    /// RMS amplitude (0...1) per audio buffer. Subscribers should hop to main
+    /// before assigning to UI state.
+    nonisolated var amplitudes: AnyPublisher<Float, Never> {
+        amplitudeSubject.eraseToAnyPublisher()
+    }
 
     init() {
         cleanupOldTempFiles()
@@ -82,6 +109,9 @@ final class AudioRecorder: @unchecked Sendable {
                 }
             }
         }
+
+        // Schedule the max-length safeguard outside the synchronous block.
+        scheduleMaxLengthGuard()
     }
 
     func stopRecording() async throws -> URL {
@@ -91,12 +121,17 @@ final class AudioRecorder: @unchecked Sendable {
                     cont.resume(throwing: AudioRecorderError.noActiveRecording)
                     return
                 }
-                guard self.isRecording, let url = self.currentURL else {
+                guard let url = self.currentURL else {
                     cont.resume(throwing: AudioRecorderError.noActiveRecording)
                     return
                 }
+                let hadSpeech = self.receivedAnySpeech
                 self.endRecordingOnQueue()
-                cont.resume(returning: url)
+                if !hadSpeech {
+                    cont.resume(throwing: AudioRecorderError.noSpeechDetected)
+                } else {
+                    cont.resume(returning: url)
+                }
             }
         }
     }
@@ -120,8 +155,6 @@ final class AudioRecorder: @unchecked Sendable {
             throw NSError(domain: "Whisperly.AudioRecorder", code: -1, userInfo: [NSLocalizedDescriptionKey: "Input format has zero sample rate (no mic?)"])
         }
 
-        // 16 kHz mono Float32 — Whisper's preferred input. We let AVAudioFile
-        // serialize to 16-bit PCM WAV via its `settings`.
         guard let proc = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false) else {
             throw AudioRecorderError.converterUnavailable
         }
@@ -130,6 +163,10 @@ final class AudioRecorder: @unchecked Sendable {
         }
         self.processingFormat = proc
         self.converter = conv
+        self.vadHasFlushed = false
+        self.vadRing.removeAll(keepingCapacity: true)
+        self.receivedAnySpeech = false
+        self.lastSpeechAt = nil
 
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("whisperly-\(UUID().uuidString).wav")
         let fileSettings: [String: Any] = [
@@ -150,17 +187,15 @@ final class AudioRecorder: @unchecked Sendable {
         self.audioFile = file
         self.currentURL = url
 
-        // Capture references for the tap closure — avoids capturing self.
         let captureConverter = conv
         let captureProc = proc
         let captureLogger = logger
         let captureQueue = queue
+        let captureSubject = amplitudeSubject
 
         inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 4_096, format: inputFormat) { buffer, _ in
-            // This closure runs on AVAudioEngine's audio thread.
-            // Convert to 16 kHz mono Float32, then hop to our serial queue
-            // for the file write so writes don't race with stop().
+            // Audio thread: convert → emit RMS → hand off to serial queue.
             let outputFrameCount = AVAudioFrameCount(
                 Double(buffer.frameLength) * captureProc.sampleRate / buffer.format.sampleRate
             ) + 1024
@@ -186,13 +221,13 @@ final class AudioRecorder: @unchecked Sendable {
             }
             guard status != .error, outBuffer.frameLength > 0 else { return }
 
+            // RMS over the converted (16 kHz mono Float32) buffer.
+            let rms = Self.rms(of: outBuffer)
+            captureSubject.send(rms)
+
             captureQueue.async { [weak self] in
-                guard let self, let file = self.audioFile else { return }
-                do {
-                    try file.write(from: outBuffer)
-                } catch {
-                    self.logger.error("AVAudioFile write failed: \(error.localizedDescription, privacy: .public)")
-                }
+                guard let self else { return }
+                self.handleConvertedBuffer(outBuffer, rms: rms)
             }
         }
 
@@ -202,18 +237,89 @@ final class AudioRecorder: @unchecked Sendable {
         logger.info("Recording started → \(url.lastPathComponent, privacy: .public) (input: \(inputFormat.sampleRate, privacy: .public) Hz, \(inputFormat.channelCount, privacy: .public) ch)")
     }
 
+    /// Runs on `queue`. Decides whether to write the buffer to disk or hold
+    /// it in the leading-silence ring.
+    private func handleConvertedBuffer(_ buffer: AVAudioPCMBuffer, rms: Float) {
+        guard let file = audioFile else { return }
+
+        let isSpeech = rms >= vadThresholdRMS
+
+        if vadHasFlushed {
+            // Past the leading silence gate. Apply trailing silence trim:
+            // if we've gone vadTrailingSilenceSeconds without any speech buffer,
+            // stop writing further buffers (the engine keeps running for amplitude
+            // updates, but the file stays at its current length).
+            if isSpeech {
+                lastSpeechAt = Date()
+                receivedAnySpeech = true
+                do { try file.write(from: buffer) }
+                catch { logger.error("AVAudioFile write failed: \(error.localizedDescription, privacy: .public)") }
+            } else if let last = lastSpeechAt, Date().timeIntervalSince(last) <= vadTrailingSilenceSeconds {
+                // Recent enough to still be a within-utterance pause — keep the silence
+                // so cadence isn't lost.
+                do { try file.write(from: buffer) }
+                catch { logger.error("AVAudioFile write failed: \(error.localizedDescription, privacy: .public)") }
+            } else {
+                // Trailing-silence territory; drop the buffer.
+            }
+            return
+        }
+
+        if isSpeech {
+            // First above-threshold buffer. Flush the ring + write current.
+            vadHasFlushed = true
+            receivedAnySpeech = true
+            lastSpeechAt = Date()
+            for ringBuffer in vadRing {
+                try? file.write(from: ringBuffer)
+            }
+            vadRing.removeAll(keepingCapacity: true)
+            do {
+                try file.write(from: buffer)
+            } catch {
+                logger.error("AVAudioFile write failed: \(error.localizedDescription, privacy: .public)")
+            }
+        } else {
+            // Hold in ring; drop oldest if at capacity.
+            vadRing.append(buffer)
+            if vadRing.count > vadRingCapacity {
+                vadRing.removeFirst(vadRing.count - vadRingCapacity)
+            }
+        }
+    }
+
     private func endRecordingOnQueue() {
         if engine.isRunning {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
         }
-        // Drop our reference so the file is finalized/closed before we hand the URL back.
         audioFile = nil
         converter = nil
         processingFormat = nil
+        vadRing.removeAll(keepingCapacity: false)
+        vadHasFlushed = false
+        lastSpeechAt = nil
         isRecording = false
         if let url = currentURL {
-            logger.info("Recording stopped → \(url.lastPathComponent, privacy: .public)")
+            logger.info("Recording stopped → \(url.lastPathComponent, privacy: .public) (speech detected: \(self.receivedAnySpeech, privacy: .public))")
+        }
+    }
+
+    private func scheduleMaxLengthGuard() {
+        let limit = maxRecordingSeconds
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(limit * 1_000_000_000))
+            guard let self else { return }
+            self.queue.async { [weak self] in
+                guard let self, self.isRecording else { return }
+                self.logger.warning("Max recording duration (\(limit, privacy: .public)s) hit — auto-stopping engine; URL remains valid.")
+                if self.engine.isRunning {
+                    self.engine.inputNode.removeTap(onBus: 0)
+                    self.engine.stop()
+                }
+                // Leave file/converter set so a subsequent stopRecording() can
+                // still read the URL. We just released the hardware.
+            }
         }
     }
 
@@ -230,5 +336,21 @@ final class AudioRecorder: @unchecked Sendable {
                 try? fm.removeItem(at: item)
             }
         }
+    }
+
+    // MARK: - DSP
+
+    /// Mean-square root over the first channel of a Float32 PCM buffer.
+    private static func rms(of buffer: AVAudioPCMBuffer) -> Float {
+        guard let channelData = buffer.floatChannelData else { return 0 }
+        let frameLength = Int(buffer.frameLength)
+        guard frameLength > 0 else { return 0 }
+        let samples = channelData[0]
+        var sum: Float = 0
+        for i in 0..<frameLength {
+            let v = samples[i]
+            sum += v * v
+        }
+        return (sum / Float(frameLength)).squareRoot()
     }
 }

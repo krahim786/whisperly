@@ -4,7 +4,7 @@ import os
 import SwiftUI
 
 /// Single ObservableObject that owns the dictation state machine and the
-/// references to all the Day 1 collaborators. The HotkeyManager calls
+/// references to all collaborators. The HotkeyManager calls
 /// `onHotkeyPressed`/`onHotkeyReleased`; this class drives the rest.
 @MainActor
 final class AppState: ObservableObject {
@@ -19,6 +19,11 @@ final class AppState: ObservableObject {
 
     @Published private(set) var phase: Phase = .idle
 
+    /// Sliding window of the most recent RMS values published by the recorder.
+    /// HUD reads this directly. Reset on entering `.recording`.
+    @Published private(set) var amplitudeHistory: [Float] = []
+    private let amplitudeHistorySize = 24
+
     /// Brief tap (< 200ms) is treated as accidental — we abandon the cycle.
     private let minimumHoldDuration: TimeInterval = 0.2
 
@@ -30,6 +35,7 @@ final class AppState: ObservableObject {
     private let haiku: HaikuClient
     private let context: ContextDetector
     private let inserter: TextInserter
+    private let sound: SoundPlayer
 
     private var cancellables = Set<AnyCancellable>()
     private var pressedAt: Date?
@@ -41,7 +47,8 @@ final class AppState: ObservableObject {
         groq: GroqClient,
         haiku: HaikuClient,
         context: ContextDetector,
-        inserter: TextInserter
+        inserter: TextInserter,
+        sound: SoundPlayer
     ) {
         self.hotkey = hotkey
         self.recorder = recorder
@@ -49,6 +56,7 @@ final class AppState: ObservableObject {
         self.haiku = haiku
         self.context = context
         self.inserter = inserter
+        self.sound = sound
 
         hotkey.events
             .receive(on: DispatchQueue.main)
@@ -59,6 +67,19 @@ final class AppState: ObservableObject {
                     self.onHotkeyPressed()
                 case .released:
                     self.onHotkeyReleased()
+                }
+            }
+            .store(in: &cancellables)
+
+        // Recorder amplitudes arrive on the audio thread; hop to main and
+        // append to the sliding window.
+        recorder.amplitudes
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] rms in
+                guard let self else { return }
+                self.amplitudeHistory.append(rms)
+                if self.amplitudeHistory.count > self.amplitudeHistorySize {
+                    self.amplitudeHistory.removeFirst(self.amplitudeHistory.count - self.amplitudeHistorySize)
                 }
             }
             .store(in: &cancellables)
@@ -76,7 +97,9 @@ final class AppState: ObservableObject {
             return
         }
         pressedAt = Date()
+        amplitudeHistory.removeAll(keepingCapacity: true)
         phase = .recording
+        sound.playStart()
         Task { [recorder] in
             do {
                 try await recorder.startRecording()
@@ -118,9 +141,13 @@ final class AppState: ObservableObject {
 
         // 1. Stop recording → URL
         phase = .transcribing
+        sound.playStop()
         let audioURL: URL
         do {
             audioURL = try await recorder.stopRecording()
+        } catch AudioRecorderError.noSpeechDetected {
+            flashError("No speech detected.")
+            return
         } catch {
             flashError(error.localizedDescription)
             return
@@ -151,8 +178,7 @@ final class AppState: ObservableObject {
         do {
             cleaned = try await haiku.cleanup(transcript: transcript, appName: appName)
         } catch {
-            // Day 1 fallback policy: if Haiku fails, paste the raw transcript so
-            // the user still gets *something*. Day 6 will refine this.
+            // Fallback: paste the raw transcript so the user still gets something.
             logger.error("Haiku cleanup failed; pasting raw transcript. Error: \(error.localizedDescription, privacy: .public)")
             phase = .pasting
             await inserter.paste(transcript)

@@ -4,6 +4,7 @@ import os
 @main
 struct whisperlyApp: App {
     @StateObject private var appState: AppState
+    @StateObject private var config = HotkeyConfig.shared
 
     private let hotkey: HotkeyManager
     private let recorder: AudioRecorder
@@ -11,18 +12,21 @@ struct whisperlyApp: App {
     private let haiku: HaikuClient
     private let context: ContextDetector
     private let inserter: TextInserter
-    private let keychain = KeychainService()
+    private let sound: SoundPlayer
+    private let hudController: HUDController
 
     private let logger = Logger(subsystem: "com.karim.whisperly", category: "App")
 
     init() {
         let keychain = KeychainService()
-        let hotkey = HotkeyManager()
+        let config = HotkeyConfig.shared
+        let hotkey = HotkeyManager(config: config)
         let recorder = AudioRecorder()
         let groq = GroqClient(keychain: keychain)
         let haiku = HaikuClient(keychain: keychain)
         let context = ContextDetector()
         let inserter = TextInserter()
+        let sound = SoundPlayer(config: config)
 
         self.hotkey = hotkey
         self.recorder = recorder
@@ -30,6 +34,7 @@ struct whisperlyApp: App {
         self.haiku = haiku
         self.context = context
         self.inserter = inserter
+        self.sound = sound
 
         let state = AppState(
             hotkey: hotkey,
@@ -37,21 +42,23 @@ struct whisperlyApp: App {
             groq: groq,
             haiku: haiku,
             context: context,
-            inserter: inserter
+            inserter: inserter,
+            sound: sound
         )
+        self.hudController = HUDController(appState: state, config: config)
         _appState = StateObject(wrappedValue: state)
     }
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarContent(appState: appState)
+            MenuBarContent(appState: appState, hudController: hudController)
         } label: {
             Image(systemName: iconName(for: appState.phase))
         }
         .menuBarExtraStyle(.menu)
 
         Settings {
-            APIKeysSettingsView()
+            SettingsRoot()
         }
     }
 
@@ -68,6 +75,7 @@ struct whisperlyApp: App {
 
 private struct MenuBarContent: View {
     @ObservedObject var appState: AppState
+    let hudController: HUDController
 
     var body: some View {
         Group {
@@ -75,7 +83,6 @@ private struct MenuBarContent: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Divider()
-            // SettingsLink wires up the same Cmd+, opening as the standard Settings menu item.
             SettingsLink {
                 Text("Settings…")
             }
@@ -87,16 +94,15 @@ private struct MenuBarContent: View {
             .keyboardShortcut("q", modifiers: [.command])
         }
         .task {
-            // Bootstrap once when the menu first appears. SwiftUI calls .task
-            // for the visible content; this is the simplest safe place to start
-            // the global hotkey monitor for v1.
+            // Bootstrap once on first appearance: start the hotkey monitor and HUD.
             appState.bootstrap()
+            hudController.start()
         }
     }
 
     private func statusText(_ phase: AppState.Phase) -> String {
         switch phase {
-        case .idle: return "Whisperly — hold Right Option to dictate"
+        case .idle: return "Whisperly — ready"
         case .recording: return "Recording…"
         case .transcribing: return "Transcribing…"
         case .cleaning: return "Polishing…"

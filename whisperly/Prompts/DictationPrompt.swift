@@ -1,6 +1,6 @@
 import Foundation
 
-enum DictationPrompt {
+nonisolated enum DictationPrompt {
     /// System prompt for dictation cleanup. The literal `{DICTIONARY_JSON}` placeholder
     /// is replaced at request time so the cached prefix stays stable across sessions
     /// while the dictionary tail invalidates only when the user's dictionary changes.
