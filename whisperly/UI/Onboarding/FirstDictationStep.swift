@@ -7,6 +7,8 @@ struct FirstDictationStep: View {
 
     @ObservedObject private var config = HotkeyConfig.shared
     @State private var practiceText: String = ""
+    @State private var launchAtLogin: Bool = LaunchAtLoginService.isEnabled
+    @State private var launchAtLoginError: String?
 
     private var hotkeySummary: String {
         let mode = config.mode == .hold ? "Hold" : "Double-tap"
@@ -49,6 +51,21 @@ struct FirstDictationStep: View {
                     .background(Color.secondary.opacity(0.15), in: Capsule())
             }
 
+            Divider()
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("Launch Whisperly at login", isOn: launchAtLoginBinding)
+                Text("Whisperly lives in the menu bar — set it to launch at login so it's always one key-press away. You can change this later in Settings → General.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let launchAtLoginError {
+                    Text(launchAtLoginError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+
             Spacer(minLength: 0)
             HStack {
                 Button("Back") { onBack() }
@@ -60,6 +77,22 @@ struct FirstDictationStep: View {
                     .keyboardShortcut(.return, modifiers: [])
             }
         }
+    }
+
+    private var launchAtLoginBinding: Binding<Bool> {
+        Binding(
+            get: { launchAtLogin },
+            set: { newValue in
+                do {
+                    let actual = try LaunchAtLoginService.setEnabled(newValue)
+                    launchAtLogin = actual
+                    launchAtLoginError = nil
+                } catch {
+                    launchAtLoginError = error.localizedDescription
+                    launchAtLogin = LaunchAtLoginService.isEnabled
+                }
+            }
+        )
     }
 
     @ViewBuilder
