@@ -213,23 +213,21 @@ private struct MenuBarContent: View {
                 .foregroundStyle(.secondary)
 
             // Tiny analytics widget — surfaced inline so users see their habit
-            // without opening a separate window.
-            if analytics.summary.dictationsAllTime > 0 {
-                Group {
-                    Text("\(analytics.summary.wordsToday) words today · \(analytics.summary.streakDays)-day streak")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text("All-time: \(analytics.summary.wordsAllTime) words · \(formatTime(analytics.summary.timeSavedMinutes)) saved")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            // without opening a separate window. Always rendered (empty state
+            // when no dictations yet) to avoid SwiftUI MenuBarExtra mis-indexing
+            // its items when the row count changes.
+            Text(analyticsTodayLine)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(analyticsAllTimeLine)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
 
-            if dictionaryStore.pendingSuggestionCount > 0 {
-                Text("\(dictionaryStore.pendingSuggestionCount) dictionary suggestion\(dictionaryStore.pendingSuggestionCount == 1 ? "" : "s")")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-            }
+            // Suggestion line is also always rendered; falls back to invisible
+            // single-space when there are none, so the menu items stay stable.
+            Text(suggestionLine)
+                .font(.caption2)
+                .foregroundStyle(dictionaryStore.pendingSuggestionCount > 0 ? .orange : .clear)
 
             Divider()
             Button("Show History…") {
@@ -292,6 +290,26 @@ private struct MenuBarContent: View {
             openWindow(id: "help")
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    private var analyticsTodayLine: String {
+        if analytics.summary.dictationsAllTime == 0 {
+            return "No dictations yet — try the hotkey"
+        }
+        return "\(analytics.summary.wordsToday) words today · \(analytics.summary.streakDays)-day streak"
+    }
+
+    private var analyticsAllTimeLine: String {
+        if analytics.summary.dictationsAllTime == 0 {
+            return " "
+        }
+        return "All-time: \(analytics.summary.wordsAllTime) words · \(formatTime(analytics.summary.timeSavedMinutes)) saved"
+    }
+
+    private var suggestionLine: String {
+        let count = dictionaryStore.pendingSuggestionCount
+        if count == 0 { return " " }
+        return "\(count) dictionary suggestion\(count == 1 ? "" : "s")"
     }
 
     private func statusText(_ phase: AppState.Phase) -> String {
