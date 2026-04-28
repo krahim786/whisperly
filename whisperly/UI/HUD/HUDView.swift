@@ -75,7 +75,16 @@ struct HUDView: View {
         case .idle:
             EmptyView()
         case .recording:
-            GradientBars(values: appState.amplitudeHistory)
+            // While we wait for the audio engine to open the hardware (50–200 ms
+            // typical), show the same synthetic flow we use during processing —
+            // gives the user immediate visual confirmation that the mic is hot,
+            // not a frozen-looking row of dead bars. As soon as the first
+            // real RMS lands we switch to the live meter.
+            if appState.amplitudeHistory.isEmpty {
+                AnimatedGradientBars()
+            } else {
+                GradientBars(values: appState.amplitudeHistory)
+            }
         case .transcribing, .cleaning, .pasting:
             AnimatedGradientBars()
         case .error:
@@ -148,10 +157,14 @@ struct GradientBars: View {
 
     private func barHeight(at i: Int, max h: CGFloat) -> CGFloat {
         let raw = CGFloat(heightSeed(at: i))
-        // Boost low values so quiet speech still produces visible motion.
-        let scaled = min(1.0, max(0.0, raw * 5.0))
-        // Always show at least a sliver so the bars never collapse to zero.
-        return max(4, scaled * h)
+        // sqrt curve: amplifies quiet ambient sound (mic-hot confirmation)
+        // while compressing loud peaks so they don't dominate. Multiplier of
+        // 6 maps a typical voice RMS of ~0.04 to ~0.49 — close to half-height.
+        let curved = (min(1.0, max(0.0, raw * 6.0))).squareRoot()
+        // Floor of 12% so the bars look alive even with pure silence — this
+        // is what tells the user "the mic is hot" before they speak.
+        let withBaseline = max(0.12, curved)
+        return withBaseline * h
     }
 }
 
