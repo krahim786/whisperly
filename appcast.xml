@@ -6,6 +6,24 @@
         <description>Most recent updates to Whisperly.</description>
         <language>en</language>
         <item>
+            <title>Version 1.2</title>
+            <pubDate>Tue, 28 Apr 2026 19:09:51 +0000</pubDate>
+            <sparkle:version>3</sparkle:version>
+            <sparkle:shortVersionString>1.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <ul>
+                    <li><strong>Offline mode</strong> — when Groq is unreachable (no internet, API error, rate limit), Whisperly falls back to on-device speech recognition so you can keep dictating without a round-trip</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/krahim786/whisperly/releases/download/v1.2/Whisperly-local.dmg"
+                sparkle:edSignature="GdnJ98mYSiGM/xI5shTNJXzYFqc7rWzoYxby4KlWYNtT+npX+AzmiQMcpuTlTYzKLW6ZQFEiYb83h311AJUTCQ=="
+                length="7474728"
+                type="application/octet-stream"
+            />
+        </item>
+        <item>
             <title>Version 1.1</title>
             <pubDate>Tue, 28 Apr 2026 14:00:03 +0000</pubDate>
             <sparkle:version>2</sparkle:version>
