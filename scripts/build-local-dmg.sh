@@ -114,6 +114,106 @@ cp -R "$APP_IN_ARCHIVE" "$EXPORT_DIR/"
 echo "▶︎ Verifying signature..."
 codesign --verify --verbose=2 "$APP_PATH" || true
 
+# --- 3.5. smoke test: actually launch the .app ---
+#
+# `codesign --verify` only checks that the signature is internally consistent.
+# It does NOT check that dyld can load the app at runtime, which is where
+# subtler issues bite — e.g. Sparkle.framework being signed by a different
+# team than the host app, with Hardened Runtime + Library Validation
+# refusing to load it. We learned this the hard way once already.
+#
+# The test:
+#   1. Copy the freshly-built .app to /tmp under a unique name (so we don't
+#      collide with whatever the user has running in /Applications).
+#   2. Strip quarantine just in case (defense in depth — local builds
+#      shouldn't have it, but it's free insurance).
+#   3. Snapshot the count of whisperly crash reports before launching.
+#   4. `open` the app, give it 5s.
+#   5. If the process isn't running OR a new crash report appeared, fail
+#      the build and print the crash reason. Otherwise kill the test
+#      process cleanly and proceed.
+#
+# Set SKIP_SMOKE_TEST=1 to bypass (e.g. in CI without a windowserver).
+
+if [ "${SKIP_SMOKE_TEST:-0}" = "1" ]; then
+  echo "▶︎ Smoke test: skipped (SKIP_SMOKE_TEST=1)"
+else
+  echo "▶︎ Smoke test: launching the .app to verify it actually loads..."
+  SMOKE_DIR="/tmp/whisperly-smoketest-$$"
+  SMOKE_APP="$SMOKE_DIR/Whisperly.app"
+  CRASH_DIR="$HOME/Library/Logs/DiagnosticReports"
+
+  cleanup_smoketest() {
+    # Best-effort kill of anything we launched, then remove the temp copy.
+    local pids
+    pids=$(pgrep -f "$SMOKE_APP/Contents/MacOS" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+      # shellcheck disable=SC2086
+      kill $pids 2>/dev/null || true
+      sleep 1
+      # shellcheck disable=SC2086
+      kill -9 $pids 2>/dev/null || true
+    fi
+    rm -rf "$SMOKE_DIR"
+  }
+  # Compose with the existing trap (which restores BundledKeys.swift).
+  trap 'cleanup_smoketest; restore_keys_file' EXIT
+
+  mkdir -p "$SMOKE_DIR"
+  cp -R "$APP_PATH" "$SMOKE_APP"
+  xattr -cr "$SMOKE_APP" 2>/dev/null || true
+
+  CRASH_BEFORE=$(ls "$CRASH_DIR"/whisperly-*.ips 2>/dev/null | wc -l | tr -d ' ')
+  open "$SMOKE_APP"
+  sleep 5
+  CRASH_AFTER=$(ls "$CRASH_DIR"/whisperly-*.ips 2>/dev/null | wc -l | tr -d ' ')
+  ALIVE_PID=$(pgrep -f "$SMOKE_APP/Contents/MacOS" | head -1 || true)
+
+  if [ "$CRASH_AFTER" -gt "$CRASH_BEFORE" ]; then
+    LATEST_CRASH=$(ls -t "$CRASH_DIR"/whisperly-*.ips 2>/dev/null | head -1)
+    echo "✗ Smoke test FAILED — app crashed during launch."
+    echo ""
+    if [ -n "$LATEST_CRASH" ]; then
+      echo "  Latest crash report: $LATEST_CRASH"
+      echo "  Termination reason:"
+      # The .ips file is two JSON objects; grep the structured 'reasons' field
+      # from the second one and print just enough to identify the cause.
+      python3 -c "
+import json, sys
+with open('$LATEST_CRASH') as f:
+    f.readline()  # skip header line
+    obj = json.load(f)
+term = obj.get('termination', {})
+ind = term.get('indicator', '')
+reasons = term.get('reasons', [])
+print(f'    indicator: {ind}')
+for r in reasons[:3]:
+    print(f'    - {r[:300]}')
+" 2>/dev/null || tail -5 "$LATEST_CRASH"
+    fi
+    echo ""
+    echo "  Common causes:"
+    echo "    - Missing entitlement (com.apple.security.cs.disable-library-validation"
+    echo "      is required for Sparkle 2 + Hardened Runtime + ad-hoc on macOS 14+)"
+    echo "    - Embedded framework signed by a different team than the host"
+    echo "    - Missing dylib at @rpath"
+    echo ""
+    echo "  Re-run with SKIP_SMOKE_TEST=1 to build a DMG anyway (e.g. for"
+    echo "  manual debugging), but DO NOT distribute that DMG."
+    exit 1
+  fi
+
+  if [ -z "$ALIVE_PID" ]; then
+    echo "✗ Smoke test FAILED — app exited within 5s without leaving a crash report."
+    echo "  This usually means Hardened Runtime killed it silently. To debug:"
+    echo "    log stream --process whisperly --level debug &"
+    echo "    open '$APP_PATH'"
+    exit 1
+  fi
+
+  echo "✓ Smoke test passed (PID $ALIVE_PID alive after 5s, no new crash report)."
+fi
+
 # --- 4. build the DMG ---
 
 echo "▶︎ Building DMG..."
