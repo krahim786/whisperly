@@ -436,6 +436,7 @@
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Whisperly uses Accessibility to detect your active app so it can format dictation appropriately and paste at your cursor.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Whisperly listens to your voice when you hold the hotkey, transcribes it, and pastes the result into your active app.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Whisperly uses on-device speech recognition to show a live preview of what you're saying while you dictate. The final transcription still goes through your chosen cloud provider for accuracy.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -484,6 +485,7 @@
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Whisperly uses Accessibility to detect your active app so it can format dictation appropriately and paste at your cursor.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Whisperly listens to your voice when you hold the hotkey, transcribes it, and pastes the result into your active app.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Whisperly uses on-device speech recognition to show a live preview of what you're saying while you dictate. The final transcription still goes through your chosen cloud provider for accuracy.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

@@ -74,6 +74,12 @@ final class AudioRecorder: @unchecked Sendable {
         maxLengthHitSubject.eraseToAnyPublisher()
     }
 
+    /// Tap consumer for converted (16 kHz mono Float32) buffers — the same
+    /// buffers we write to the WAV. Used by SpeechRecognizer for the live
+    /// preview while we record. Set/cleared from MainActor (AppState) around
+    /// each recording cycle.
+    nonisolated(unsafe) var bufferConsumer: (@Sendable (AVAudioPCMBuffer) -> Void)?
+
     init() {
         cleanupOldTempFiles()
     }
@@ -232,6 +238,13 @@ final class AudioRecorder: @unchecked Sendable {
             // RMS over the converted (16 kHz mono Float32) buffer.
             let rms = Self.rms(of: outBuffer)
             captureSubject.send(rms)
+
+            // Forward the same converted buffer to whatever live consumer
+            // is attached (SpeechRecognizer for the HUD preview). The consumer
+            // closure is responsible for any further dispatching.
+            if let consumer = self.bufferConsumer {
+                consumer(outBuffer)
+            }
 
             captureQueue.async { [weak self] in
                 guard let self else { return }

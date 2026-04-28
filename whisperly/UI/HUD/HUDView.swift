@@ -10,10 +10,21 @@ struct HUDView: View {
             waveform
                 .frame(width: 96, height: 46)
             VStack(alignment: .leading, spacing: 2) {
-                Text(stateText)
-                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
+                if case .recording = appState.phase, !appState.liveTranscript.isEmpty {
+                    // Live preview wins the prime label slot during recording —
+                    // it's what the user actually wants to see.
+                    Text(appState.liveTranscript)
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .truncationMode(.head)
+                        .animation(.easeOut(duration: 0.12), value: appState.liveTranscript)
+                } else {
+                    Text(stateText)
+                        .font(.system(size: 22, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
                 if case .error(let message) = appState.phase {
                     Text(message)
                         .font(.system(size: 11))

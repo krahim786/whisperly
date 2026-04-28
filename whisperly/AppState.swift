@@ -32,6 +32,12 @@ final class AppState: ObservableObject {
 
     @Published private(set) var modeDisplay: String?
 
+    /// Live partial transcript from on-device speech recognition. Updated
+    /// continuously while phase == .recording; cleared on phase change.
+    /// HUD reads this directly. Empty string when no preview is available
+    /// (permission denied, locale unsupported, etc.).
+    @Published private(set) var liveTranscript: String = ""
+
     private let minimumHoldDuration: TimeInterval = 0.2
 
     private let logger = Logger(subsystem: "com.karim.whisperly", category: "AppState")
@@ -47,6 +53,7 @@ final class AppState: ObservableObject {
     private let snippets: SnippetStore
     private let dictionary: DictionaryStore
     private let config: HotkeyConfig
+    private let speech = SpeechRecognizer()
 
     private var cancellables = Set<AnyCancellable>()
     private var pressedAt: Date?
@@ -108,6 +115,24 @@ final class AppState: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Live partial transcripts from on-device speech recognition. Each
+        // partial replaces the previous (Apple's recognizer always returns
+        // the full hypothesis-so-far, not deltas).
+        speech.partialTranscripts
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] text in
+                guard let self else { return }
+                self.liveTranscript = text
+            }
+            .store(in: &cancellables)
+
+        // Audio buffers from the recorder go to both the WAV file (existing)
+        // and the live recognizer (new). The consumer closure runs on the
+        // audio thread; SpeechRecognizer.append hops to its own serial queue.
+        recorder.bufferConsumer = { [speech] buffer in
+            speech.append(buffer)
+        }
+
         // Recorder publishes a max-length-hit signal; surface it in the HUD.
         recorder.maxLengthHits
             .receive(on: DispatchQueue.main)
@@ -137,6 +162,12 @@ final class AppState: ObservableObject {
             Task.detached { [history, retention = config.historyRetentionDays] in
                 _ = try? await history.enforceRetention(retentionDays: retention)
             }
+        }
+        // Ask once at bootstrap so the user sees the dialog before their first
+        // dictation rather than mid-recording. Result doesn't gate anything;
+        // SpeechRecognizer.start() silently no-ops if not authorized.
+        Task.detached {
+            _ = await SpeechRecognizer.requestAuthorization()
         }
     }
 
@@ -174,9 +205,18 @@ final class AppState: ObservableObject {
 
         pressedAt = Date()
         amplitudeHistory.removeAll(keepingCapacity: true)
+        liveTranscript = ""
         phase = .recording
         sound.playStart()
         FileLogger.shared.write(category: "AppState", level: "info", "Recording started")
+
+        // Start live preview. Locale matches the user's chosen speaking
+        // language when translation is on; defaults to system locale otherwise.
+        let speechLocale: String? = config.translationEnabled
+            ? config.translationInputLanguage.whisperCode
+            : nil
+        speech.start(localeCode: speechLocale)
+
         Task { [recorder] in
             do {
                 try await recorder.startRecording()
@@ -199,10 +239,12 @@ final class AppState: ObservableObject {
         if held < minimumHoldDuration {
             logger.info("Hold duration \(String(format: "%.3f", held))s under threshold — cancelling.")
             recorder.cancel()
+            speech.stop()
             pendingSelectionFallback?.cancel()
             pendingSelectionFallback = nil
             phase = .idle
             modeDisplay = nil
+            liveTranscript = ""
             return
         }
 
@@ -213,6 +255,11 @@ final class AppState: ObservableObject {
     }
 
     private func runPipeline(holdDuration: TimeInterval) async {
+        // Stop the live recognizer immediately on release. Whisper takes over
+        // for the canonical transcription; the partial preview is no longer
+        // useful past this point.
+        speech.stop()
+
         let appName = context.frontmostAppName()
 
         // Resolve the Cmd+C fallback, if any, before deciding the cycle mode.
@@ -414,8 +461,10 @@ final class AppState: ObservableObject {
         logger.warning("Audio interruption: \(reason, privacy: .public) — cancelling.")
         FileLogger.shared.write(category: "AppState", level: "warn", "Audio interrupted: \(reason)")
         recorder.cancel()
+        speech.stop()
         pendingSelectionFallback?.cancel()
         pendingSelectionFallback = nil
+        liveTranscript = ""
         flashError("Recording interrupted (\(reason)).")
     }
 
