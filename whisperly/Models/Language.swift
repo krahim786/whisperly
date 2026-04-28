@@ -18,6 +18,7 @@ nonisolated enum Language: String, CaseIterable, Codable, Identifiable, Sendable
     case turkish
     case arabic
     case hindi
+    case urdu
     case chineseSimplified
     case japanese
     case korean
@@ -43,6 +44,7 @@ nonisolated enum Language: String, CaseIterable, Codable, Identifiable, Sendable
         case .turkish: return "Turkish"
         case .arabic: return "Arabic"
         case .hindi: return "Hindi"
+        case .urdu: return "Urdu"
         case .chineseSimplified: return "Chinese (Simplified)"
         case .japanese: return "Japanese"
         case .korean: return "Korean"
@@ -69,6 +71,7 @@ nonisolated enum Language: String, CaseIterable, Codable, Identifiable, Sendable
         case .turkish: return "Türkçe"
         case .arabic: return "العربية"
         case .hindi: return "हिन्दी"
+        case .urdu: return "اُردُو"
         case .chineseSimplified: return "简体中文"
         case .japanese: return "日本語"
         case .korean: return "한국어"
@@ -105,6 +108,7 @@ nonisolated enum Language: String, CaseIterable, Codable, Identifiable, Sendable
         case .turkish: return "tr"
         case .arabic: return "ar"
         case .hindi: return "hi"
+        case .urdu: return "ur"
         case .chineseSimplified: return "zh"
         case .japanese: return "ja"
         case .korean: return "ko"
