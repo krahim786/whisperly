@@ -54,6 +54,7 @@ final class AppState: ObservableObject {
     private let dictionary: DictionaryStore
     private let config: HotkeyConfig
     private let speech = SpeechRecognizer()
+    private let local = LocalTranscriber()
 
     private var cancellables = Set<AnyCancellable>()
     private var pressedAt: Date?
@@ -291,7 +292,9 @@ final class AppState: ObservableObject {
             return
         }
 
-        // 2. Groq transcribe
+        // 2. Transcribe — Groq first; fall back to on-device if Groq's
+        //    unreachable. Auth/bad-input errors don't fall back since local
+        //    won't fix those.
         let biasingTerms = dictionary.topTermsForBiasing(limit: 20)
         // When translation is on, use the user's chosen speaking language
         // (whisperCode is nil for .auto, which omits the field). When off,
@@ -300,13 +303,29 @@ final class AppState: ObservableObject {
             ? config.translationInputLanguage.whisperCode
             : "en"
         let transcript: String
+        var usedOfflineFallback = false
         do {
             transcript = try await groq.transcribe(audioURL: audioURL, biasingTerms: biasingTerms, languageCode: languageCode)
         } catch {
-            try? FileManager.default.removeItem(at: audioURL)
-            FileLogger.shared.write(category: "AppState", level: "error", "Groq failed: \(error.localizedDescription)")
-            flashError(error.localizedDescription)
-            return
+            if shouldFallBackToLocal(error: error), local.isAuthorized {
+                logger.warning("Groq failed (\(error.localizedDescription, privacy: .public)) — trying on-device transcription.")
+                FileLogger.shared.write(category: "AppState", level: "warn", "Groq failed; trying local fallback: \(error.localizedDescription)")
+                modeDisplay = "Offline mode"
+                do {
+                    transcript = try await local.transcribeFile(at: audioURL, languageCode: languageCode)
+                    usedOfflineFallback = true
+                } catch {
+                    try? FileManager.default.removeItem(at: audioURL)
+                    FileLogger.shared.write(category: "AppState", level: "error", "Local fallback failed: \(error.localizedDescription)")
+                    flashError("Offline mode failed: \(error.localizedDescription)")
+                    return
+                }
+            } else {
+                try? FileManager.default.removeItem(at: audioURL)
+                FileLogger.shared.write(category: "AppState", level: "error", "Groq failed (no fallback): \(error.localizedDescription)")
+                flashError(error.localizedDescription)
+                return
+            }
         }
         try? FileManager.default.removeItem(at: audioURL)
 
@@ -318,6 +337,58 @@ final class AppState: ObservableObject {
         }
 
         let dictionaryJSON = dictionary.jsonForPrompt()
+
+        // Offline path: Groq fell over and we used the local transcriber.
+        // Snippets still work (they're pure text matching). Edit mode can't
+        // run because we have no way to rewrite the selection without Haiku.
+        // Everything else gets the raw local transcript pasted with a brief
+        // "not polished" warning, so the user gets *something* useful instead
+        // of a frozen "transcribing…" state.
+        if usedOfflineFallback {
+            // Snippet bypass — works offline, no LLM needed.
+            if case .dictation = cycleMode,
+               let snippet = SnippetMatcher.match(transcript: transcript, in: snippets.snippets) {
+                logger.info("Offline + snippet matched: \(snippet.trigger, privacy: .public)")
+                phase = .pasting
+                await inserter.paste(snippet.expansion)
+                phase = .idle
+                modeDisplay = nil
+                snippets.recordUse(id: snippet.id)
+                await logHistory(
+                    mode: .dictation,
+                    appName: appName,
+                    rawTranscript: transcript,
+                    cleanedText: snippet.expansion,
+                    selectionInput: nil,
+                    holdDuration: holdDuration
+                )
+                return
+            }
+
+            // Edit mode requires Haiku to rewrite the selection. We can't
+            // safely paste the spoken instruction over the user's selection,
+            // so error out cleanly.
+            if case .edit = cycleMode {
+                flashError("Edit mode needs internet — try again when connected.")
+                return
+            }
+
+            // Dictation / command / translation all paste raw locally.
+            phase = .pasting
+            await inserter.paste(transcript)
+            phase = .idle
+            modeDisplay = nil
+            await logHistory(
+                mode: .dictation,
+                appName: appName,
+                rawTranscript: transcript,
+                cleanedText: transcript,
+                selectionInput: nil,
+                holdDuration: holdDuration
+            )
+            flashWarning("Offline mode — text not polished")
+            return
+        }
 
         // 3-translate: when translation is on (and we're not in edit mode),
         // skip snippet/command detection — both rely on English-language
@@ -439,6 +510,26 @@ final class AppState: ObservableObject {
             selectionInput: selectionForLog,
             holdDuration: holdDuration
         )
+    }
+
+    /// Decides whether a Groq failure warrants attempting on-device
+    /// transcription. We skip the fallback for errors that local recognition
+    /// can't fix anyway (auth, corrupt audio).
+    private func shouldFallBackToLocal(error: any Error) -> Bool {
+        guard let groqError = error as? GroqClientError else {
+            // Unknown error → try local as a last resort.
+            return true
+        }
+        switch groqError {
+        case .invalidAudioFile:
+            // The recording itself is broken — local won't help.
+            return false
+        case .unauthorized, .missingAPIKey, .rateLimited, .server, .network, .decoding:
+            // Network / server / quota / config issues → local can recover.
+            // (We even fall back on missingAPIKey so the app isn't dead in
+            // the water if the user clears their key while offline.)
+            return true
+        }
     }
 
     /// Wraps a Haiku call with one retry on rate-limit. After 1 second we try
