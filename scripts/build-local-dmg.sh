@@ -118,7 +118,9 @@ codesign --verify --verbose=2 "$APP_PATH" || true
 
 echo "▶︎ Building DMG..."
 mkdir -p "$DMG_STAGING"
-cp -R "$APP_PATH" "$DMG_STAGING/"
+# Capitalize the bundle name as it appears in the DMG (the build target is
+# 'whisperly' lowercase; users expect 'Whisperly.app').
+cp -R "$APP_PATH" "$DMG_STAGING/Whisperly.app"
 ln -s /Applications "$DMG_STAGING/Applications"
 
 hdiutil create \
