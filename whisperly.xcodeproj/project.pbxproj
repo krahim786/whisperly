@@ -442,8 +442,8 @@
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Whisperly listens to your voice when you hold the hotkey, transcribes it, and pastes the result into your active app.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Whisperly uses on-device speech recognition to show a live preview of what you're saying while you dictate. The final transcription still goes through your chosen cloud provider for accuracy.";
 				INFOPLIST_KEY_SUEnableAutomaticChecks = YES;
-				INFOPLIST_KEY_SUFeedURL = "https://example.com/whisperly/appcast.xml";
-				INFOPLIST_KEY_SUPublicEDKey = PUT_YOUR_PUBLIC_ED_KEY_HERE;
+				INFOPLIST_KEY_SUFeedURL = "https://github.com/krahim786/whisperly/releases/latest/download/appcast.xml";
+				INFOPLIST_KEY_SUPublicEDKey = "0IXMWOASnIti1nzFHoU+68wiLi3rskWCPvDbh9t5lgQ=";
 				INFOPLIST_KEY_SUScheduledCheckInterval = 86400;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -495,8 +495,8 @@
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Whisperly listens to your voice when you hold the hotkey, transcribes it, and pastes the result into your active app.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Whisperly uses on-device speech recognition to show a live preview of what you're saying while you dictate. The final transcription still goes through your chosen cloud provider for accuracy.";
 				INFOPLIST_KEY_SUEnableAutomaticChecks = YES;
-				INFOPLIST_KEY_SUFeedURL = "https://example.com/whisperly/appcast.xml";
-				INFOPLIST_KEY_SUPublicEDKey = PUT_YOUR_PUBLIC_ED_KEY_HERE;
+				INFOPLIST_KEY_SUFeedURL = "https://github.com/krahim786/whisperly/releases/latest/download/appcast.xml";
+				INFOPLIST_KEY_SUPublicEDKey = "0IXMWOASnIti1nzFHoU+68wiLi3rskWCPvDbh9t5lgQ=";
 				INFOPLIST_KEY_SUScheduledCheckInterval = 86400;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

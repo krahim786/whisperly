@@ -1,0 +1,25 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
+    <channel>
+        <title>Whisperly</title>
+        <link>https://github.com/krahim786/whisperly/releases/latest/download/appcast.xml</link>
+        <description>Most recent updates to Whisperly.</description>
+        <language>en</language>
+        <item>
+            <title>Version 1.0</title>
+            <pubDate>Tue, 28 Apr 2026 13:17:50 +0000</pubDate>
+            <sparkle:version>1</sparkle:version>
+            <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <p>First public release of Whisperly.</p>
+            ]]></description>
+            <enclosure
+                url="https://github.com/krahim786/whisperly/releases/download/v1.0/Whisperly-local.dmg"
+                sparkle:edSignature="ZRMaahJUUcKn0vSWqVnQubPe5GQP2E/Xqv4VEFEBUhYA/YgtjcZDFxmJgudswcr4J9gl3UXAa+76e5aD1sPwAQ=="
+                length="6393072"
+                type="application/octet-stream"
+            />
+        </item>
+    </channel>
+</rss>
