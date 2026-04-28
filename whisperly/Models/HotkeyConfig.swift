@@ -20,6 +20,31 @@ final class HotkeyConfig: ObservableObject {
         }
     }
 
+    /// How aggressively cleanup should rewrite. `.standard` is the original
+    /// behavior — light grammar fixes, preserve voice. `.grammarFix` adds
+    /// a stronger rewrite pass aimed at non-native English speakers or
+    /// users whose dictation grammar is weak.
+    enum WritingAssistance: String, CaseIterable, Identifiable {
+        case standard
+        case grammarFix
+
+        var id: String { rawValue }
+        var displayName: String {
+            switch self {
+            case .standard: return "Standard cleanup"
+            case .grammarFix: return "Grammar correction"
+            }
+        }
+        var caption: String {
+            switch self {
+            case .standard:
+                return "Removes filler words and fixes obvious mistakes. Preserves your voice."
+            case .grammarFix:
+                return "Also fixes article use, verb tenses, prepositions, and awkward phrasing. Best for non-native speakers or casual speech that needs polishing."
+            }
+        }
+    }
+
     /// Modifier-only keys we support. Modifier keys can't be reached via Carbon
     /// hotkey APIs — they only generate `.flagsChanged` events, which we
     /// monitor by `keyCode` in HotkeyManager.
@@ -64,6 +89,7 @@ final class HotkeyConfig: ObservableObject {
         static let historyEnabled = "history.enabled"
         static let historyRetentionDays = "history.retentionDays"
         static let verboseLogging = "logging.verbose"
+        static let writingAssistance = "writing.assistance"
     }
 
     @Published var mode: Mode {
@@ -101,6 +127,10 @@ final class HotkeyConfig: ObservableObject {
         }
     }
 
+    @Published var writingAssistance: WritingAssistance {
+        didSet { UserDefaults.standard.set(writingAssistance.rawValue, forKey: Defaults.writingAssistance) }
+    }
+
     private init() {
         let d = UserDefaults.standard
         self.mode = Mode(rawValue: d.string(forKey: Defaults.mode) ?? "") ?? .hold
@@ -117,5 +147,7 @@ final class HotkeyConfig: ObservableObject {
         let verbose = (d.object(forKey: Defaults.verboseLogging) as? Bool) ?? false
         self.verboseLogging = verbose
         FileLogger.shared.setEnabled(verbose)
+        let storedAssistance = d.string(forKey: Defaults.writingAssistance)
+        self.writingAssistance = storedAssistance.flatMap(WritingAssistance.init(rawValue:)) ?? .standard
     }
 }

@@ -19,6 +19,7 @@ nonisolated enum CommandPrompt {
     - "casual" / "informal" → casual rewrite
     - "formal" / "professional" → formal rewrite
     - "translate to X" → translate following content to X
+    - "fix grammar" / "fix this" / "fix" → rewrite into natural, correct English: fix article use, verb tenses, prepositions, word order, and L2 phrasing. Preserve voice, tone, and meaning. Don't add information, don't summarize, don't change register.
 
     If no command is detected, treat the entire input as normal dictation.
 
@@ -63,5 +64,6 @@ nonisolated enum CommandPrompt {
         "table",
         "casual", "informal",
         "formal", "professional",
+        "fix grammar", "fix this", "fix",
     ]
 }

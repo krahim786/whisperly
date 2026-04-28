@@ -38,6 +38,23 @@ struct GeneralSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Section("Writing assistance") {
+                Picker("Cleanup style", selection: $config.writingAssistance) {
+                    ForEach(HotkeyConfig.WritingAssistance.allCases) { level in
+                        Text(level.displayName).tag(level)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+                Text(config.writingAssistance.caption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Tip: even with Standard cleanup selected, you can ask for a one-off grammar fix by starting your dictation with \"fix grammar\" — for example \"fix grammar: he go to store yesterday\".")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("Onboarding") {
                 Button("Re-run onboarding") {
                     OnboardingState.reset()

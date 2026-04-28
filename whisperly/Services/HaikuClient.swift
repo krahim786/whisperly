@@ -75,10 +75,10 @@ nonisolated final class HaikuClient: Sendable {
         }
     }
 
-    func cleanup(transcript: String, appName: String, dictionaryJSON: String = "[]") async throws -> String {
-        let systemPrompt = DictationPrompt.system(dictionaryJSON: dictionaryJSON)
+    func cleanup(transcript: String, appName: String, dictionaryJSON: String = "[]", grammarFix: Bool = false) async throws -> String {
+        let systemPrompt = DictationPrompt.system(dictionaryJSON: dictionaryJSON, grammarFix: grammarFix)
         let userMessage = "Target app: \(appName)\nRaw transcript: \(transcript)"
-        return try await complete(system: systemPrompt, user: userMessage, label: "cleanup")
+        return try await complete(system: systemPrompt, user: userMessage, label: grammarFix ? "cleanup-gf" : "cleanup")
     }
 
     /// Edit-mode call: rewrite `selection` according to the spoken `instruction`.

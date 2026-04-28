@@ -295,8 +295,9 @@ final class AppState: ObservableObject {
                     historyMode = .command
                     selectionForLog = nil
                 } else {
+                    let useGrammarFix = config.writingAssistance == .grammarFix
                     cleaned = try await haikuWithRetry { [haiku] in
-                        try await haiku.cleanup(transcript: transcript, appName: appName, dictionaryJSON: dictionaryJSON)
+                        try await haiku.cleanup(transcript: transcript, appName: appName, dictionaryJSON: dictionaryJSON, grammarFix: useGrammarFix)
                     }
                     historyMode = .dictation
                     selectionForLog = nil
