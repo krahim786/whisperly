@@ -6,6 +6,29 @@
         <description>Most recent updates to Whisperly.</description>
         <language>en</language>
         <item>
+            <title>Version 1.1</title>
+            <pubDate>Tue, 28 Apr 2026 14:00:03 +0000</pubDate>
+            <sparkle:version>2</sparkle:version>
+            <sparkle:shortVersionString>1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <ul>
+                    <li><strong>Translation</strong> — speak in any of 19 languages and Whisperly pastes the translation, with auto-detect or pinned source language</li>
+                    <li><strong>Grammar correction</strong> — new "Writing assistance" setting fixes article use, verb tenses, prepositions, and L2 phrasing while preserving voice</li>
+                    <li><strong>Live transcript preview</strong> — see what you're saying as you speak, via on-device speech recognition; Whisper still does the canonical pass</li>
+                    <li><strong>Audio level meter</strong> — bars are alive from the moment you press the hotkey, with subtle ambient response and proper sensitivity curve</li>
+                    <li><strong>Auto-updates</strong> — future versions will install automatically (this is the first release with Sparkle wired up)</li>
+                    <li>Bundled-key family-share path, Urdu added, dictation-mode fixes</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/krahim786/whisperly/releases/download/v1.1/Whisperly-local.dmg"
+                sparkle:edSignature="LKT6Nz+Kvu61OY400e/hxkyCB01a9HqULFHHZi89CxykddKh3bcTkJvR7mktU+jaL63wXOb1TEkGwycI+1Q2Dw=="
+                length="6402460"
+                type="application/octet-stream"
+            />
+        </item>
+        <item>
             <title>Version 1.0</title>
             <pubDate>Tue, 28 Apr 2026 13:37:58 +0000</pubDate>
             <sparkle:version>1</sparkle:version>
