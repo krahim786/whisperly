@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GeneralSettingsView: View {
     @ObservedObject private var config = HotkeyConfig.shared
+    @ObservedObject var updates: UpdateService
     @State private var launchAtLogin = LaunchAtLoginService.isEnabled
     @State private var launchAtLoginError: String?
 
@@ -86,6 +87,35 @@ struct GeneralSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Section("Updates") {
+                Toggle("Automatically check for updates", isOn: $updates.automaticChecks)
+                HStack {
+                    Button("Check now") { updates.checkForUpdates() }
+                        .disabled(!updates.canCheckForUpdates)
+                    if let last = updates.lastCheckDateText {
+                        Text("Last check: \(last)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Never checked")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                if !updates.isFeedConfigured {
+                    Text("⚠ The update feed URL is still a placeholder. See SPARKLE.md to wire up your appcast and EdDSA keypair before updates can flow.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Whisperly checks for new versions in the background and notifies you when one is available. Updates are EdDSA-signed end-to-end so only the maintainer's builds will install.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             Section("Diagnostics") {
                 Toggle("Write verbose logs to ~/Library/Logs/Whisperly/", isOn: $config.verboseLogging)
                 HStack {
@@ -133,5 +163,5 @@ extension Notification.Name {
 }
 
 #Preview {
-    GeneralSettingsView()
+    GeneralSettingsView(updates: UpdateService())
 }

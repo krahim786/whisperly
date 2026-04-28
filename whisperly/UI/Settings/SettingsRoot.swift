@@ -4,10 +4,11 @@ struct SettingsRoot: View {
     let historyStore: HistoryStore?
     let snippetStore: SnippetStore
     let dictionaryStore: DictionaryStore
+    @ObservedObject var updates: UpdateService
 
     var body: some View {
         TabView {
-            GeneralSettingsView()
+            GeneralSettingsView(updates: updates)
                 .tabItem { Label("General", systemImage: "gearshape") }
             HotkeySettingsView()
                 .tabItem { Label("Hotkey", systemImage: "keyboard") }

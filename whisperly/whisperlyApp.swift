@@ -8,6 +8,7 @@ struct whisperlyApp: App {
     @StateObject private var snippetStore: SnippetStore
     @StateObject private var dictionaryStore: DictionaryStore
     @StateObject private var analytics: AnalyticsTracker
+    @StateObject private var updateService: UpdateService
 
     private let hotkey: HotkeyManager
     private let recorder: AudioRecorder
@@ -68,11 +69,13 @@ struct whisperlyApp: App {
         self.hudController = HUDController(appState: state, config: config)
 
         let analytics = AnalyticsTracker(store: history)
+        let updates = UpdateService()
 
         _appState = StateObject(wrappedValue: state)
         _snippetStore = StateObject(wrappedValue: snippets)
         _dictionaryStore = StateObject(wrappedValue: dictionary)
         _analytics = StateObject(wrappedValue: analytics)
+        _updateService = StateObject(wrappedValue: updates)
     }
 
     var body: some Scene {
@@ -81,7 +84,8 @@ struct whisperlyApp: App {
                 appState: appState,
                 hudController: hudController,
                 dictionaryStore: dictionaryStore,
-                analytics: analytics
+                analytics: analytics,
+                updates: updateService
             )
         } label: {
             Image(systemName: iconName(for: appState.phase))
@@ -92,7 +96,8 @@ struct whisperlyApp: App {
             SettingsRoot(
                 historyStore: history,
                 snippetStore: snippetStore,
-                dictionaryStore: dictionaryStore
+                dictionaryStore: dictionaryStore,
+                updates: updateService
             )
         }
 
@@ -160,11 +165,17 @@ struct whisperlyApp: App {
                     NotificationCenter.default.post(name: .showAcknowledgements, object: nil)
                 }
             }
-            // Replace the default About menu item to open our custom window.
+            // Replace the default About menu item to open our custom window,
+            // and add "Check for Updates…" right beneath it (Apple HIG: this
+            // is where users expect to find it).
             CommandGroup(replacing: .appInfo) {
                 Button("About Whisperly") {
                     NotificationCenter.default.post(name: .showAbout, object: nil)
                 }
+                Button("Check for Updates…") {
+                    updateService.checkForUpdates()
+                }
+                .disabled(!updateService.canCheckForUpdates)
             }
         }
     }
@@ -204,6 +215,7 @@ private struct MenuBarContent: View {
     let hudController: HUDController
     @ObservedObject var dictionaryStore: DictionaryStore
     @ObservedObject var analytics: AnalyticsTracker
+    @ObservedObject var updates: UpdateService
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -253,6 +265,10 @@ private struct MenuBarContent: View {
                 NSApp.activate(ignoringOtherApps: true)
             }
             .keyboardShortcut("?", modifiers: [.command])
+            Button("Check for Updates…") {
+                updates.checkForUpdates()
+            }
+            .disabled(!updates.canCheckForUpdates)
             Divider()
             Button("Quit Whisperly") {
                 NSApp.terminate(nil)

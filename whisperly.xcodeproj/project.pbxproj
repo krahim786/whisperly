@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1AAAAAA32F9FDE480041704F /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 1AAAAAA22F9FDE480041704F /* GRDB */; };
+		1BBBBBB32F9FDE480041704F /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 1BBBBBB22F9FDE480041704F /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -70,6 +71,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1AAAAAA32F9FDE480041704F /* GRDB in Frameworks */,
+				1BBBBBB32F9FDE480041704F /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -131,6 +133,7 @@
 			name = whisperly;
 			packageProductDependencies = (
 				1AAAAAA22F9FDE480041704F /* GRDB */,
+				1BBBBBB22F9FDE480041704F /* Sparkle */,
 			);
 			productName = whisperly;
 			productReference = 19115FE32F9FDE470041704F /* whisperly.app */;
@@ -216,6 +219,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				1AAAAAA12F9FDE480041704F /* XCRemoteSwiftPackageReference "GRDB" */,
+				1BBBBBB12F9FDE480041704F /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 19115FE42F9FDE470041704F /* Products */;
@@ -437,6 +441,10 @@
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Whisperly listens to your voice when you hold the hotkey, transcribes it, and pastes the result into your active app.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Whisperly uses on-device speech recognition to show a live preview of what you're saying while you dictate. The final transcription still goes through your chosen cloud provider for accuracy.";
+				INFOPLIST_KEY_SUEnableAutomaticChecks = YES;
+				INFOPLIST_KEY_SUFeedURL = "https://example.com/whisperly/appcast.xml";
+				INFOPLIST_KEY_SUPublicEDKey = PUT_YOUR_PUBLIC_ED_KEY_HERE;
+				INFOPLIST_KEY_SUScheduledCheckInterval = 86400;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -486,6 +494,10 @@
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Whisperly listens to your voice when you hold the hotkey, transcribes it, and pastes the result into your active app.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Whisperly uses on-device speech recognition to show a live preview of what you're saying while you dictate. The final transcription still goes through your chosen cloud provider for accuracy.";
+				INFOPLIST_KEY_SUEnableAutomaticChecks = YES;
+				INFOPLIST_KEY_SUFeedURL = "https://example.com/whisperly/appcast.xml";
+				INFOPLIST_KEY_SUPublicEDKey = PUT_YOUR_PUBLIC_ED_KEY_HERE;
+				INFOPLIST_KEY_SUScheduledCheckInterval = 86400;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -639,6 +651,14 @@
 				minimumVersion = 6.0.0;
 			};
 		};
+		1BBBBBB12F9FDE480041704F /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -646,6 +666,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1AAAAAA12F9FDE480041704F /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
+		};
+		1BBBBBB22F9FDE480041704F /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1BBBBBB12F9FDE480041704F /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
