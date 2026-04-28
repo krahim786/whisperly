@@ -71,6 +71,14 @@ struct whisperlyApp: App {
         let analytics = AnalyticsTracker(store: history)
         let updates = UpdateService()
 
+        // When TextInserter sees a paste attempt with AX trust missing, it
+        // skips the doomed ⌘V and signals AppState to refresh the banner +
+        // surface the once-per-session alert. Captured weakly so the closure
+        // doesn't keep AppState alive past app termination.
+        inserter.onAccessibilityRevoked = { [weak state] in
+            state?.presentAccessibilityRevokedAlertIfNeeded()
+        }
+
         _appState = StateObject(wrappedValue: state)
         _snippetStore = StateObject(wrappedValue: snippets)
         _dictionaryStore = StateObject(wrappedValue: dictionary)
@@ -220,6 +228,20 @@ private struct MenuBarContent: View {
 
     var body: some View {
         Group {
+            // Accessibility-revoked banner. Surfaces silently-failing paste
+            // mode that the ad-hoc-signed family-share build hits after every
+            // Sparkle update. The text item is non-clickable; the button next
+            // to it deep-links to System Settings → Accessibility.
+            if !appState.isAccessibilityTrusted {
+                Text("⚠ Accessibility permission needed")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.orange)
+                Button("Open Privacy & Security Settings") {
+                    AccessibilityChecker.openSystemSettings()
+                }
+                Divider()
+            }
+
             Text(statusText(appState.phase))
                 .font(.caption)
                 .foregroundStyle(.secondary)

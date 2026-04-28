@@ -38,6 +38,19 @@ final class AppState: ObservableObject {
     /// (permission denied, locale unsupported, etc.).
     @Published private(set) var liveTranscript: String = ""
 
+    /// Whether the OS currently trusts Whisperly for Accessibility (and,
+    /// transitively, for synthesized ⌘V paste). On the ad-hoc-signed
+    /// family-share build this gets revoked silently every Sparkle update —
+    /// the menu UI watches this flag to surface a banner asking the user
+    /// to re-grant. Refreshed on launch, on every app-becomes-active event,
+    /// and whenever TextInserter notices a paste-time untrusted state.
+    @Published private(set) var isAccessibilityTrusted: Bool = AccessibilityChecker.isTrusted
+
+    /// Tracks whether we've already shown the one-shot NSAlert for this
+    /// app session. Reset on every fresh launch (intentionally NOT persisted
+    /// to UserDefaults — every launch should re-warn until granted).
+    private var hasShownAccessibilityAlertThisSession = false
+
     private let minimumHoldDuration: TimeInterval = 0.2
 
     private let logger = Logger(subsystem: "com.karim.whisperly", category: "AppState")
@@ -155,6 +168,66 @@ final class AppState: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.handleAudioInterruption(reason: "audio device changed") }
             .store(in: &cancellables)
+
+        // Re-check Accessibility trust whenever the app comes to foreground,
+        // which is the moment the user typically returns from System Settings
+        // after granting permission. The banner clears within ~1s of them
+        // flipping the toggle.
+        NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshAccessibilityTrust() }
+            .store(in: &cancellables)
+    }
+
+    /// Re-reads the current Accessibility trust state. Idempotent and safe
+    /// to call from anywhere on main. TextInserter calls this when it sees
+    /// `AXIsProcessTrusted() == false` at paste time — that's the latest
+    /// possible signal we have that the grant was revoked.
+    func refreshAccessibilityTrust() {
+        let now = AccessibilityChecker.isTrusted
+        if now != isAccessibilityTrusted {
+            isAccessibilityTrusted = now
+            FileLogger.shared.write(
+                category: "AppState",
+                level: "info",
+                "Accessibility trust changed: \(now)"
+            )
+        }
+    }
+
+    /// Show the one-shot Accessibility-revoked alert if (a) we're not trusted
+    /// and (b) we haven't already shown it this session. Callable from
+    /// TextInserter when a paste is attempted in an untrusted state.
+    func presentAccessibilityRevokedAlertIfNeeded() {
+        // Always re-read first — caller's signal might be slightly stale.
+        refreshAccessibilityTrust()
+        guard !isAccessibilityTrusted else { return }
+        guard !hasShownAccessibilityAlertThisSession else { return }
+        hasShownAccessibilityAlertThisSession = true
+
+        let alert = NSAlert()
+        alert.messageText = "Whisperly needs Accessibility permission"
+        alert.informativeText = """
+            macOS reset Whisperly's Accessibility permission, so the dictation \
+            you just spoke wasn't pasted.
+
+            On the family-share (ad-hoc signed) build this happens after every \
+            Sparkle update — the new binary has a different code-signing hash, \
+            and macOS treats it as a fresh app. See SPARKLE.md.
+
+            Click "Open Settings" to grant permission, then come back to \
+            Whisperly. Your next dictation will paste normally.
+            """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Cancel")
+
+        // Bring the app forward so the alert isn't buried.
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            AccessibilityChecker.openSystemSettings()
+        }
     }
 
     func bootstrap() {

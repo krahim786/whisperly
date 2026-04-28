@@ -16,6 +16,13 @@ import os
 final class TextInserter {
     private let logger = Logger(subsystem: "com.karim.whisperly", category: "TextInserter")
 
+    /// Called when a paste is attempted while Accessibility trust is missing.
+    /// AppState wires this up to refresh its `isAccessibilityTrusted` flag and
+    /// (if still revoked) show the one-shot NSAlert with an Open-Settings
+    /// button. We skip the actual ⌘V in that case — posting it would be a
+    /// silent no-op and the user wouldn't know why nothing happened.
+    var onAccessibilityRevoked: (@MainActor () -> Void)?
+
     /// Symmetric alias for use sites that semantically replace a selection.
     /// The actual mechanism is identical: writing to the pasteboard and
     /// posting ⌘V — when text is currently selected, the paste replaces it.
@@ -29,6 +36,16 @@ final class TextInserter {
         let frontApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Unknown"
         let trustedPrompt = AXIsProcessTrustedWithOptions(nil)
         logger.info("Pasting \(text.count, privacy: .public) chars into \(frontApp, privacy: .public) — Accessibility trusted: \(trustedPrompt, privacy: .public)")
+
+        // Bail before touching the pasteboard if AX trust is missing — the
+        // synthesized ⌘V will be silently dropped by the OS, and continuing
+        // would leave the cleaned text on the user's clipboard for 230ms
+        // before we restored the original. The callback lets AppState
+        // refresh its banner flag and surface the one-shot alert.
+        if !trustedPrompt {
+            onAccessibilityRevoked?()
+            return
+        }
 
         let pasteboard = NSPasteboard.general
         let savedItems = snapshotPasteboard(pasteboard)
