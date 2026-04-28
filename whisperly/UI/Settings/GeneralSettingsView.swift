@@ -55,6 +55,26 @@ struct GeneralSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Section("Translation") {
+                Toggle("Translate dictation", isOn: $config.translationEnabled)
+                if config.translationEnabled {
+                    Picker("Speaking language", selection: $config.translationInputLanguage) {
+                        ForEach(Language.inputOptions) { lang in
+                            Text(lang.pickerLabel).tag(lang)
+                        }
+                    }
+                    Picker("Translate to", selection: $config.translationOutputLanguage) {
+                        ForEach(Language.outputOptions) { lang in
+                            Text(lang.pickerLabel).tag(lang)
+                        }
+                    }
+                }
+                Text("Speak in any supported language and Whisperly will paste the translation. Pick \"Auto-detect\" as your speaking language if you switch between languages day to day. Snippets and command verbs are paused while translation is on, since both rely on English-language matching.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("Onboarding") {
                 Button("Re-run onboarding") {
                     OnboardingState.reset()

@@ -71,7 +71,12 @@ nonisolated final class GroqClient: Sendable {
     /// parameter to bias the STT output toward the user's vocabulary — proper
     /// nouns, product names, etc. Whisper accepts up to 244 prompt tokens; we
     /// cap the joined string length defensively at 1024 chars to stay under that.
-    func transcribe(audioURL: URL, biasingTerms: [String] = []) async throws -> String {
+    ///
+    /// `languageCode` is the ISO 639-1 hint for Whisper. Pass `nil` to let
+    /// Whisper auto-detect from the audio (used by translation mode when
+    /// the user has selected "Auto-detect" as the speaking language).
+    /// Defaults to "en" so existing English-only users see no change.
+    func transcribe(audioURL: URL, biasingTerms: [String] = [], languageCode: String? = "en") async throws -> String {
         guard let apiKey = keychain.load(key: KeychainService.groqAPIKey), !apiKey.isEmpty else {
             throw GroqClientError.missingAPIKey
         }
@@ -88,7 +93,8 @@ nonisolated final class GroqClient: Sendable {
             boundary: boundary,
             audioData: audioData,
             filename: audioURL.lastPathComponent,
-            biasingPrompt: makeBiasingPrompt(from: biasingTerms)
+            biasingPrompt: makeBiasingPrompt(from: biasingTerms),
+            languageCode: languageCode
         )
 
         let start = Date()
@@ -130,7 +136,7 @@ nonisolated final class GroqClient: Sendable {
         }
     }
 
-    private func makeMultipartBody(boundary: String, audioData: Data, filename: String, biasingPrompt: String?) -> Data {
+    private func makeMultipartBody(boundary: String, audioData: Data, filename: String, biasingPrompt: String?, languageCode: String?) -> Data {
         var body = Data()
 
         func appendField(_ name: String, _ value: String) {
@@ -141,8 +147,11 @@ nonisolated final class GroqClient: Sendable {
 
         appendField("model", model)
         appendField("response_format", "json")
-        appendField("language", "en")
         appendField("temperature", "0")
+        // Omit `language` for auto-detect; pass the ISO code otherwise.
+        if let languageCode, !languageCode.isEmpty {
+            appendField("language", languageCode)
+        }
         if let biasingPrompt, !biasingPrompt.isEmpty {
             appendField("prompt", biasingPrompt)
         }

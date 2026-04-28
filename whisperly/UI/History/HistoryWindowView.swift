@@ -148,6 +148,7 @@ private struct ModeBadge: View {
         case .dictation: return .blue
         case .edit: return .orange
         case .command: return .purple
+        case .translation: return .teal
         }
     }
 }

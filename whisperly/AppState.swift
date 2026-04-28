@@ -159,7 +159,13 @@ final class AppState: ObservableObject {
             // AX returned nothing. Tentatively dictation; fire ⌘C fallback in
             // parallel. If it lands before the user releases, we upgrade to edit.
             currentMode = .dictation
-            modeDisplay = nil
+            // Show translation target on the HUD when translation is enabled,
+            // so the user has visual confirmation before they speak.
+            if config.translationEnabled {
+                modeDisplay = "→ \(config.translationOutputLanguage.nativeName)"
+            } else {
+                modeDisplay = nil
+            }
             pendingSelectionFallback?.cancel()
             pendingSelectionFallback = Task { [context] in
                 await context.getSelectedTextViaCopy()
@@ -240,9 +246,15 @@ final class AppState: ObservableObject {
 
         // 2. Groq transcribe
         let biasingTerms = dictionary.topTermsForBiasing(limit: 20)
+        // When translation is on, use the user's chosen speaking language
+        // (whisperCode is nil for .auto, which omits the field). When off,
+        // keep the original "en" default so existing users see no change.
+        let languageCode: String? = config.translationEnabled
+            ? config.translationInputLanguage.whisperCode
+            : "en"
         let transcript: String
         do {
-            transcript = try await groq.transcribe(audioURL: audioURL, biasingTerms: biasingTerms)
+            transcript = try await groq.transcribe(audioURL: audioURL, biasingTerms: biasingTerms, languageCode: languageCode)
         } catch {
             try? FileManager.default.removeItem(at: audioURL)
             FileLogger.shared.write(category: "AppState", level: "error", "Groq failed: \(error.localizedDescription)")
@@ -259,6 +271,40 @@ final class AppState: ObservableObject {
         }
 
         let dictionaryJSON = dictionary.jsonForPrompt()
+
+        // 3-translate: when translation is on (and we're not in edit mode),
+        // skip snippet/command detection — both rely on English-language
+        // matching that won't make sense on a non-English transcript.
+        if case .dictation = cycleMode, config.translationEnabled {
+            phase = .cleaning
+            let cleaned: String
+            do {
+                let target = config.translationOutputLanguage
+                cleaned = try await haikuWithRetry { [haiku] in
+                    try await haiku.translate(transcript: transcript, targetLanguage: target, appName: appName, dictionaryJSON: dictionaryJSON)
+                }
+            } catch {
+                logger.error("Haiku translate failed; pasting raw transcript. Error: \(error.localizedDescription, privacy: .public)")
+                FileLogger.shared.write(category: "AppState", level: "error", "Haiku translate failed: \(error.localizedDescription)")
+                phase = .pasting
+                await inserter.paste(transcript)
+                flashWarning("Translation skipped — \(error.localizedDescription)")
+                return
+            }
+            phase = .pasting
+            await inserter.paste(cleaned)
+            phase = .idle
+            modeDisplay = nil
+            await logHistory(
+                mode: .translation,
+                appName: appName,
+                rawTranscript: transcript,
+                cleanedText: cleaned,
+                selectionInput: nil,
+                holdDuration: holdDuration
+            )
+            return
+        }
 
         // 3a. Snippet bypass
         if case .dictation = cycleMode,

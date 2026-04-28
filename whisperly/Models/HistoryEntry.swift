@@ -12,12 +12,14 @@ nonisolated struct HistoryEntry: Identifiable, Equatable, Codable, Sendable {
         case dictation
         case edit
         case command
+        case translation
 
         var displayName: String {
             switch self {
             case .dictation: return "Dictation"
             case .edit: return "Edit"
             case .command: return "Command"
+            case .translation: return "Translate"
             }
         }
     }

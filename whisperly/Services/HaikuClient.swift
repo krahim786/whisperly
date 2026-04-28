@@ -104,6 +104,15 @@ nonisolated final class HaikuClient: Sendable {
         return try await complete(system: systemPrompt, user: userMessage, label: "command")
     }
 
+    /// Translation mode: render `transcript` naturally in `targetLanguage` and
+    /// apply standard cleanup at the same time. Whisper has already done STT
+    /// in the source language; this is the translate-and-polish pass.
+    func translate(transcript: String, targetLanguage: Language, appName: String, dictionaryJSON: String = "[]") async throws -> String {
+        let systemPrompt = TranslationPrompt.system(targetLanguage: targetLanguage, dictionaryJSON: dictionaryJSON)
+        let userMessage = "Target app: \(appName)\nRaw transcript: \(transcript)"
+        return try await complete(system: systemPrompt, user: userMessage, label: "translate-\(targetLanguage.rawValue)")
+    }
+
     // MARK: - Shared completion path
 
     private func complete(system: String, user: String, label: String) async throws -> String {

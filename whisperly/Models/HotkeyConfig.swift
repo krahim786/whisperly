@@ -90,6 +90,9 @@ final class HotkeyConfig: ObservableObject {
         static let historyRetentionDays = "history.retentionDays"
         static let verboseLogging = "logging.verbose"
         static let writingAssistance = "writing.assistance"
+        static let translationEnabled = "translation.enabled"
+        static let translationInputLanguage = "translation.input"
+        static let translationOutputLanguage = "translation.output"
     }
 
     @Published var mode: Mode {
@@ -131,6 +134,18 @@ final class HotkeyConfig: ObservableObject {
         didSet { UserDefaults.standard.set(writingAssistance.rawValue, forKey: Defaults.writingAssistance) }
     }
 
+    @Published var translationEnabled: Bool {
+        didSet { UserDefaults.standard.set(translationEnabled, forKey: Defaults.translationEnabled) }
+    }
+
+    @Published var translationInputLanguage: Language {
+        didSet { UserDefaults.standard.set(translationInputLanguage.rawValue, forKey: Defaults.translationInputLanguage) }
+    }
+
+    @Published var translationOutputLanguage: Language {
+        didSet { UserDefaults.standard.set(translationOutputLanguage.rawValue, forKey: Defaults.translationOutputLanguage) }
+    }
+
     private init() {
         let d = UserDefaults.standard
         self.mode = Mode(rawValue: d.string(forKey: Defaults.mode) ?? "") ?? .hold
@@ -149,5 +164,11 @@ final class HotkeyConfig: ObservableObject {
         FileLogger.shared.setEnabled(verbose)
         let storedAssistance = d.string(forKey: Defaults.writingAssistance)
         self.writingAssistance = storedAssistance.flatMap(WritingAssistance.init(rawValue:)) ?? .standard
+
+        self.translationEnabled = (d.object(forKey: Defaults.translationEnabled) as? Bool) ?? false
+        let storedInput = d.string(forKey: Defaults.translationInputLanguage)
+        self.translationInputLanguage = storedInput.flatMap(Language.init(rawValue:)) ?? .auto
+        let storedOutput = d.string(forKey: Defaults.translationOutputLanguage)
+        self.translationOutputLanguage = storedOutput.flatMap(Language.init(rawValue:)) ?? .english
     }
 }
