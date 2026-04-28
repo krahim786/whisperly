@@ -6,6 +6,24 @@
         <description>Most recent updates to Whisperly.</description>
         <language>en</language>
         <item>
+            <title>Version 1.3</title>
+            <pubDate>Tue, 28 Apr 2026 19:29:00 +0000</pubDate>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>1.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <ul>
+                    <li><strong>Permission diagnostics</strong> — when macOS resets Whisperly's Accessibility permission after an update, the menu bar now shows a banner with a one-click button to open System Settings instead of failing silently. A first-paste alert also fires once per session if the grant is missing.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/krahim786/whisperly/releases/download/v1.3/Whisperly-local.dmg"
+                sparkle:edSignature="6rCTRhM/vjUX195/iQDZ9HveDcCt++Qw0FFRR11Hgd0HqT9phMUPmltKJFsY+WjXFllC8omvJ9ccZ4lzlST1Dg=="
+                length="6416958"
+                type="application/octet-stream"
+            />
+        </item>
+        <item>
             <title>Version 1.2</title>
             <pubDate>Tue, 28 Apr 2026 19:09:51 +0000</pubDate>
             <sparkle:version>3</sparkle:version>
