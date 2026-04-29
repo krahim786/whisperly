@@ -77,10 +77,19 @@ final class AppState: ObservableObject {
     /// Mode for the cycle currently in flight. Set on press, consumed on pipeline completion.
     private var currentMode: DictationMode = .dictation
 
-    /// True when the user pressed the hotkey while also holding Shift —
-    /// signals "show me the action menu after transcription instead of
-    /// auto-cleaning". Captured at press time and consumed in runPipeline.
+    /// True if Shift was held at the moment of press OR added at any point
+    /// while the hotkey was still held. Means "show me the action menu after
+    /// transcription instead of auto-cleaning". Once true within a press
+    /// window, stays true even if Shift is released early.
     private var wantsActionMenu: Bool = false
+
+    /// Local + global flagsChanged monitors active only while the hotkey is
+    /// held — they set `wantsActionMenu = true` if Shift becomes held mid-
+    /// recording, and update the HUD subtitle so the user gets visual
+    /// confirmation. Installed in onHotkeyPressed, torn down on release /
+    /// cancel / audio interruption.
+    private var shiftMonitorLocal: Any?
+    private var shiftMonitorGlobal: Any?
 
     /// Async task for the Cmd+C selection fallback, in case AX selection-reading
     /// fails (e.g. Electron). Awaited before the pipeline routes to edit/dictation.
@@ -266,7 +275,13 @@ final class AppState: ObservableObject {
         // hotkey, the user wants the action menu after transcription.
         // Action-menu mode bypasses AX selection: it always treats the
         // utterance as fresh dictation, never as an edit instruction.
+        //
+        // We don't only sample at press time — `installShiftMonitor()` keeps
+        // watching during the press window so that adding Shift mid-recording
+        // also routes to the menu. This makes the gesture forgiving: the user
+        // can press Option first and decide to grab the menu a beat later.
         wantsActionMenu = NSEvent.modifierFlags.contains(.shift)
+        installShiftMonitor()
 
         if wantsActionMenu {
             currentMode = .dictation
@@ -334,11 +349,16 @@ final class AppState: ObservableObject {
             speech.stop()
             pendingSelectionFallback?.cancel()
             pendingSelectionFallback = nil
+            tearDownShiftMonitor()
             phase = .idle
             modeDisplay = nil
             liveTranscript = ""
             return
         }
+
+        // Stop watching for Shift now that the user's released the hotkey —
+        // any further Shift presses are unrelated.
+        tearDownShiftMonitor()
 
         inFlightTask?.cancel()
         inFlightTask = Task { [weak self] in
@@ -647,6 +667,47 @@ final class AppState: ObservableObject {
         )
     }
 
+    // MARK: - Shift-during-press monitor
+
+    /// Installs local + global flagsChanged monitors that flip
+    /// `wantsActionMenu = true` if Shift becomes held mid-press. Idempotent —
+    /// safe to call again before teardown. Also updates the HUD subtitle to
+    /// "Action menu" so the user gets immediate visual confirmation that
+    /// they've crossed the threshold.
+    private func installShiftMonitor() {
+        tearDownShiftMonitor()
+        let local = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleFlagsChanged(event)
+            return event
+        }
+        let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            // Global monitor closures don't run on @MainActor by default.
+            Task { @MainActor [weak self] in
+                self?.handleFlagsChanged(event)
+            }
+        }
+        shiftMonitorLocal = local
+        shiftMonitorGlobal = global
+    }
+
+    private func tearDownShiftMonitor() {
+        if let m = shiftMonitorLocal { NSEvent.removeMonitor(m); shiftMonitorLocal = nil }
+        if let m = shiftMonitorGlobal { NSEvent.removeMonitor(m); shiftMonitorGlobal = nil }
+    }
+
+    private func handleFlagsChanged(_ event: NSEvent) {
+        guard !wantsActionMenu else { return }  // already armed; nothing to do
+        guard event.modifierFlags.contains(.shift) else { return }
+        wantsActionMenu = true
+        // Update the HUD subtitle live unless we're in edit mode (selection
+        // overrides — user's existing selection takes precedence over a
+        // mid-press Shift add).
+        if case .dictation = currentMode {
+            modeDisplay = "Action menu"
+            FileLogger.shared.write(category: "AppState", level: "info", "Shift added mid-press; armed action menu")
+        }
+    }
+
     /// Decides whether a Groq failure warrants attempting on-device
     /// transcription. We skip the fallback for errors that local recognition
     /// can't fix anyway (auth, corrupt audio).
@@ -690,6 +751,7 @@ final class AppState: ObservableObject {
         speech.stop()
         pendingSelectionFallback?.cancel()
         pendingSelectionFallback = nil
+        tearDownShiftMonitor()
         liveTranscript = ""
         flashError("Recording interrupted (\(reason)).")
     }
