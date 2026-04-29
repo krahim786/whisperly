@@ -6,6 +6,25 @@
         <description>Most recent updates to Whisperly.</description>
         <language>en</language>
         <item>
+            <title>Version 1.5</title>
+            <pubDate>Wed, 29 Apr 2026 15:19:52 +0000</pubDate>
+            <sparkle:version>6</sparkle:version>
+            <sparkle:shortVersionString>1.5</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <ul>
+                    <li><strong>Action menu</strong> — hold Right Option + Shift while dictating, then pick from a 4-button menu above the HUD: Grammar, Personal, Formal, or Shorter. Press Esc anywhere to cancel. Plain Right Option still pastes cleaned text immediately.</li>
+                    <li><strong>HUD blur-in / blur-out</strong> — the recording HUD now blurs in when you press the hotkey and blurs out after pasting, so it's less abrupt at both ends of a dictation.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/krahim786/whisperly/releases/download/v1.5/Whisperly-local.dmg"
+                sparkle:edSignature="dmVVH2LgiYqCFuMk0Jv6MHJP9+rw6/Z7f9c8qvnWQQabiYf+yKbS46f6zaHOynZ6gMAJpEUDW6aCdxv1gfCJDA=="
+                length="7524858"
+                type="application/octet-stream"
+            />
+        </item>
+        <item>
             <title>Version 1.4</title>
             <pubDate>Wed, 29 Apr 2026 11:59:30 +0000</pubDate>
             <sparkle:version>5</sparkle:version>
