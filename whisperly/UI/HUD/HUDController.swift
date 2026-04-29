@@ -62,25 +62,32 @@ final class HUDController {
         guard config.showHUD else { return }
         let panel = ensurePanel()
         positionPanel(panel)
-        // orderFrontRegardless avoids activating the app — this is critical so
-        // we don't pull focus away from the user's text editor mid-dictation.
+
         // Cancel any in-flight hide-out task so a quick re-press during fade-out
         // doesn't leave the panel half-faded.
         hideTask?.cancel()
         hideTask = nil
+
+        // Bring the panel on-screen if a previous hide() ordered it out.
+        // orderFrontRegardless avoids activating the app, preserving the
+        // user's frontmost text editor.
         if !panel.isVisible {
-            panel.alphaValue = 0
             panel.orderFrontRegardless()
-            NSAnimationContext.runAnimationGroup { ctx in
-                // Mirror HUDView.appearAnimation so blur + alpha land together.
-                ctx.duration = 0.40
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                panel.animator().alphaValue = 1
-            }
-        } else {
-            // Already visible (e.g. error → recording transition). Make sure
-            // we're at full alpha; SwiftUI handles the blur side.
-            panel.alphaValue = 1
+        }
+
+        // ALWAYS animate alphaValue to 1 via .animator() — robust against
+        // every prior state in one motion:
+        //   - fresh show after orderOut (alpha left at 0 by previous hide)
+        //   - already visible at alpha=1 (no-op animation)
+        //   - mid-fade-out (the new .animator() set supersedes the in-flight
+        //     hide animation; without this, hide's animation kept driving
+        //     toward 0 and the panel ended up invisible — the bug where
+        //     "everything works but no HUD shows up after a few cycles")
+        // Mirror HUDView.appearAnimation so blur + alpha land together.
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.40
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
         }
     }
 
