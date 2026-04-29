@@ -6,6 +6,24 @@
         <description>Most recent updates to Whisperly.</description>
         <language>en</language>
         <item>
+            <title>Version 1.6</title>
+            <pubDate>Wed, 29 Apr 2026 15:29:25 +0000</pubDate>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>1.6</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <ul>
+                    <li><strong>Action menu — Shift can be added mid-press</strong> — if you hold Right Option first and add Shift a beat later, the action menu now arms correctly. Previously the modifier was sampled only at press-time, so a slightly slow Shift was missed. Once armed, the HUD subtitle updates live to "Action menu" for visual confirmation.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/krahim786/whisperly/releases/download/v1.6/Whisperly-local.dmg"
+                sparkle:edSignature="fLU9h8V6NHzUoRyV5Vf4KCtDpGUdgHMRxJvArK48LuBG+0eIc3zSigDmmECrQwLqdzT31KMQ70cHbgNW98A4Bw=="
+                length="6451661"
+                type="application/octet-stream"
+            />
+        </item>
+        <item>
             <title>Version 1.5</title>
             <pubDate>Wed, 29 Apr 2026 15:19:52 +0000</pubDate>
             <sparkle:version>6</sparkle:version>
