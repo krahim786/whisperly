@@ -104,6 +104,15 @@ nonisolated final class HaikuClient: Sendable {
         return try await complete(system: systemPrompt, user: userMessage, label: "command")
     }
 
+    /// Action-menu transform: apply a user-picked style (grammar / personal /
+    /// formal / shorter) to the transcript. Used by the post-dictation menu
+    /// the user gets when holding Right Option + Shift.
+    func transform(transcript: String, style: ActionMenuStyle, appName: String, dictionaryJSON: String = "[]") async throws -> String {
+        let systemPrompt = ActionMenuPrompt.system(style: style, dictionaryJSON: dictionaryJSON)
+        let userMessage = "Target app: \(appName)\nRaw transcript: \(transcript)"
+        return try await complete(system: systemPrompt, user: userMessage, label: "transform-\(style.rawValue)")
+    }
+
     /// Translation mode: render `transcript` naturally in `targetLanguage` and
     /// apply standard cleanup at the same time. Whisper has already done STT
     /// in the source language; this is the translate-and-polish pass.

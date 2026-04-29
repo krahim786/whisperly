@@ -53,6 +53,8 @@ struct whisperlyApp: App {
         self.sound = sound
         self.history = history
 
+        let actionMenu = ActionMenuController()
+
         let state = AppState(
             hotkey: hotkey,
             recorder: recorder,
@@ -64,7 +66,8 @@ struct whisperlyApp: App {
             history: history,
             snippets: snippets,
             dictionary: dictionary,
-            config: config
+            config: config,
+            actionMenu: actionMenu
         )
         self.hudController = HUDController(appState: state, config: config)
 

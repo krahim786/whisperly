@@ -68,6 +68,7 @@ final class AppState: ObservableObject {
     private let config: HotkeyConfig
     private let speech = SpeechRecognizer()
     private let local = LocalTranscriber()
+    private let actionMenu: ActionMenuController
 
     private var cancellables = Set<AnyCancellable>()
     private var pressedAt: Date?
@@ -75,6 +76,11 @@ final class AppState: ObservableObject {
 
     /// Mode for the cycle currently in flight. Set on press, consumed on pipeline completion.
     private var currentMode: DictationMode = .dictation
+
+    /// True when the user pressed the hotkey while also holding Shift —
+    /// signals "show me the action menu after transcription instead of
+    /// auto-cleaning". Captured at press time and consumed in runPipeline.
+    private var wantsActionMenu: Bool = false
 
     /// Async task for the Cmd+C selection fallback, in case AX selection-reading
     /// fails (e.g. Electron). Awaited before the pipeline routes to edit/dictation.
@@ -91,7 +97,8 @@ final class AppState: ObservableObject {
         history: HistoryStore?,
         snippets: SnippetStore,
         dictionary: DictionaryStore,
-        config: HotkeyConfig
+        config: HotkeyConfig,
+        actionMenu: ActionMenuController
     ) {
         self.hotkey = hotkey
         self.recorder = recorder
@@ -104,6 +111,7 @@ final class AppState: ObservableObject {
         self.snippets = snippets
         self.dictionary = dictionary
         self.config = config
+        self.actionMenu = actionMenu
 
         hotkey.events
             .receive(on: DispatchQueue.main)
@@ -254,8 +262,18 @@ final class AppState: ObservableObject {
             return
         }
 
-        // Synchronous AX read first — fast path. Most native apps return here.
-        if let selection = context.getSelectedText() {
+        // Read modifier state at press time — if Shift is held alongside the
+        // hotkey, the user wants the action menu after transcription.
+        // Action-menu mode bypasses AX selection: it always treats the
+        // utterance as fresh dictation, never as an edit instruction.
+        wantsActionMenu = NSEvent.modifierFlags.contains(.shift)
+
+        if wantsActionMenu {
+            currentMode = .dictation
+            modeDisplay = "Action menu"
+            pendingSelectionFallback?.cancel()
+            pendingSelectionFallback = nil
+        } else if let selection = context.getSelectedText() {
             currentMode = .edit(selection: selection)
             modeDisplay = "Editing selection"
             pendingSelectionFallback = nil
@@ -410,6 +428,50 @@ final class AppState: ObservableObject {
         }
 
         let dictionaryJSON = dictionary.jsonForPrompt()
+
+        // Action-menu mode: user dictated with Right Option + Shift. Show the
+        // 4-button menu above the HUD, suspend until they pick (or Esc),
+        // then run Haiku.transform with the chosen style.
+        if wantsActionMenu, !usedOfflineFallback {
+            FileLogger.shared.write(category: "AppState", level: "info", "Action menu shown")
+            let chosen = await actionMenu.choose()
+            guard let style = chosen else {
+                logger.info("Action menu cancelled — no paste.")
+                phase = .idle
+                modeDisplay = nil
+                wantsActionMenu = false
+                return
+            }
+            wantsActionMenu = false
+            phase = .cleaning
+            modeDisplay = style.label
+            let cleaned: String
+            do {
+                cleaned = try await haikuWithRetry { [haiku] in
+                    try await haiku.transform(transcript: transcript, style: style, appName: appName, dictionaryJSON: dictionaryJSON)
+                }
+            } catch {
+                logger.error("Haiku transform (\(style.rawValue, privacy: .public)) failed; falling back to raw. Error: \(error.localizedDescription, privacy: .public)")
+                FileLogger.shared.write(category: "AppState", level: "error", "Haiku transform failed: \(error.localizedDescription)")
+                phase = .pasting
+                await inserter.paste(transcript)
+                flashWarning("\(style.label) failed — \(error.localizedDescription)")
+                return
+            }
+            phase = .pasting
+            await inserter.paste(cleaned)
+            phase = .idle
+            modeDisplay = nil
+            await logHistory(
+                mode: .command,
+                appName: appName,
+                rawTranscript: transcript,
+                cleanedText: cleaned,
+                selectionInput: nil,
+                holdDuration: holdDuration
+            )
+            return
+        }
 
         // Offline path: Groq fell over and we used the local transcriber.
         // Snippets still work (they're pure text matching). Edit mode can't

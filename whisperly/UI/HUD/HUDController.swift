@@ -64,12 +64,52 @@ final class HUDController {
         positionPanel(panel)
         // orderFrontRegardless avoids activating the app — this is critical so
         // we don't pull focus away from the user's text editor mid-dictation.
-        panel.orderFrontRegardless()
+        // Cancel any in-flight hide-out task so a quick re-press during fade-out
+        // doesn't leave the panel half-faded.
+        hideTask?.cancel()
+        hideTask = nil
+        if !panel.isVisible {
+            panel.alphaValue = 0
+            panel.orderFrontRegardless()
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.22
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1
+            }
+        } else {
+            // Already visible (e.g. error → recording transition). Make sure
+            // we're at full alpha; SwiftUI handles the blur side.
+            panel.alphaValue = 1
+        }
     }
 
     private func hide() {
-        panel?.orderOut(nil)
+        guard let panel = self.panel, panel.isVisible else { return }
+        // SwiftUI inside the panel animates blurRadius to 24 over 0.18s on
+        // its own (HUDView observes phase). We mirror with an alpha fade
+        // here, then orderOut on completion so the resources release.
+        let panelRef = panel
+        hideTask?.cancel()
+        let task = Task { @MainActor in
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    ctx.duration = 0.18
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                    panelRef.animator().alphaValue = 0
+                }, completionHandler: {
+                    cont.resume()
+                })
+            }
+            // If show() ran during the fade and reset alpha to 1, don't
+            // hide. Otherwise, retire the panel.
+            if !Task.isCancelled, panelRef.alphaValue == 0 {
+                panelRef.orderOut(nil)
+            }
+        }
+        hideTask = task
     }
+
+    private var hideTask: Task<Void, Never>?
 
     private func repositionIfVisible() {
         guard let panel, panel.isVisible else { return }

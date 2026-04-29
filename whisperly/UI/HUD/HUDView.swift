@@ -1,9 +1,18 @@
 import SwiftUI
 
 /// Pill-shaped HUD: dark glassy capsule with a tall gradient waveform on
-/// the left and a large state label on the right.
+/// the left and a large state label on the right. Blurs in when phase
+/// becomes non-idle, blurs out when phase returns to idle (HUDController
+/// fades the underlying panel's alphaValue in lockstep).
 struct HUDView: View {
     @ObservedObject var appState: AppState
+
+    /// Animated blur radius. Starts at the "blurred-out" target so the very
+    /// first appearance animates *into* clarity rather than snapping.
+    @State private var blurRadius: CGFloat = 24
+
+    private static let appearAnimation: Animation = .easeOut(duration: 0.22)
+    private static let disappearAnimation: Animation = .easeIn(duration: 0.18)
 
     var body: some View {
         HStack(spacing: 18) {
@@ -44,6 +53,23 @@ struct HUDView: View {
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(pillBackground)
+        .blur(radius: blurRadius)
+        .onAppear {
+            // First mount usually happens with phase already non-idle (the
+            // HUDController orders the panel front in response to the same
+            // phase change). Animate from the blurred-out initial state to
+            // sharp.
+            if appState.phase != .idle {
+                withAnimation(Self.appearAnimation) { blurRadius = 0 }
+            }
+        }
+        .onChange(of: appState.phase) { _, newPhase in
+            if newPhase == .idle {
+                withAnimation(Self.disappearAnimation) { blurRadius = 24 }
+            } else if blurRadius > 0 {
+                withAnimation(Self.appearAnimation) { blurRadius = 0 }
+            }
+        }
     }
 
     // MARK: - Background
