@@ -11,8 +11,10 @@ struct HUDView: View {
     /// first appearance animates *into* clarity rather than snapping.
     @State private var blurRadius: CGFloat = 24
 
-    private static let appearAnimation: Animation = .easeOut(duration: 0.22)
-    private static let disappearAnimation: Animation = .easeIn(duration: 0.18)
+    // Durations are mirrored in HUDController.show/hide so the SwiftUI blur
+    // and the panel's alphaValue fade in/out together. Bump them in lockstep.
+    private static let appearAnimation: Animation = .easeOut(duration: 0.40)
+    private static let disappearAnimation: Animation = .easeIn(duration: 0.32)
 
     var body: some View {
         HStack(spacing: 18) {

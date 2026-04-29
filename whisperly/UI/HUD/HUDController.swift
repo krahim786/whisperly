@@ -72,7 +72,8 @@ final class HUDController {
             panel.alphaValue = 0
             panel.orderFrontRegardless()
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.22
+                // Mirror HUDView.appearAnimation so blur + alpha land together.
+                ctx.duration = 0.40
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 panel.animator().alphaValue = 1
             }
@@ -93,7 +94,8 @@ final class HUDController {
         let task = Task { @MainActor in
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                 NSAnimationContext.runAnimationGroup({ ctx in
-                    ctx.duration = 0.18
+                    // Mirror HUDView.disappearAnimation.
+                    ctx.duration = 0.32
                     ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
                     panelRef.animator().alphaValue = 0
                 }, completionHandler: {
