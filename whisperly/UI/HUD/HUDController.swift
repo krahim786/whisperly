@@ -95,12 +95,13 @@ final class HUDController {
     }
 
     private func positionPanel(_ panel: HUDPanel) {
-        // Bottom-right of the screen with the keyboard focus, falling back
-        // to the main screen.
+        // Bottom-center of the screen with the keyboard focus, falling back
+        // to the main screen. Centered horizontally, sat `edgeMargin` above
+        // the bottom of the visible area (so it clears the Dock).
         let targetScreen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
         guard let screen = targetScreen else { return }
         let frame = screen.visibleFrame
-        let originX = frame.maxX - panelSize.width - edgeMargin
+        let originX = frame.midX - panelSize.width / 2
         let originY = frame.minY + edgeMargin
         panel.setFrame(NSRect(x: originX, y: originY, width: panelSize.width, height: panelSize.height), display: true)
     }
