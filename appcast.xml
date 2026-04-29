@@ -6,6 +6,25 @@
         <description>Most recent updates to Whisperly.</description>
         <language>en</language>
         <item>
+            <title>Version 1.6.1</title>
+            <pubDate>Wed, 29 Apr 2026 23:51:40 +0000</pubDate>
+            <sparkle:version>8</sparkle:version>
+            <sparkle:shortVersionString>1.6.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <ul>
+                    <li><strong>Bugfix — HUD invisible after several dictations</strong>. The recording HUD could get stuck invisible if you re-pressed the hotkey while the previous fade-out animation was still running. Dictation kept working but the on-screen indicator stopped appearing. Fixed by making the show animation supersede any in-flight fade-out.</li>
+                    <li><strong>Slightly longer blur in / blur out</strong> on the HUD (0.40s in, 0.32s out, up from 0.22s / 0.18s) so the transitions feel less abrupt at both ends of a dictation.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/krahim786/whisperly/releases/download/v1.6.1/Whisperly-local.dmg"
+                sparkle:edSignature="4WKWnH8M0BTSwvgHuMrf6lwd4PQEfvcuc3vcORH8Z/1jiZe6QPnWGyVOXowv58WXQERajaMktPZwW38bN5ccBw=="
+                length="6484429"
+                type="application/octet-stream"
+            />
+        </item>
+        <item>
             <title>Version 1.6</title>
             <pubDate>Wed, 29 Apr 2026 15:29:25 +0000</pubDate>
             <sparkle:version>7</sparkle:version>
