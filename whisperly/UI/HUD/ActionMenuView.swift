@@ -1,17 +1,33 @@
 import SwiftUI
 
-/// Compact horizontal menu of transformation actions. Sits above the HUD
-/// after a Right-Option-+-Shift dictation. Click any button → that style is
-/// returned via the `onChoice` closure, the menu dismisses, and AppState
-/// runs Haiku.transform with the chosen style.
+/// Two-row menu of transformation actions. Sits above the HUD after a
+/// Right-Option-+-Shift dictation (or a quick refine tap). Click any button
+/// → that style is returned via the `onChoice` closure, the menu dismisses,
+/// and AppState runs Haiku.transform with the chosen style.
+///
+/// Row 1 is tone/grammar (Grammar / Personal / Formal / Shorter), row 2 is
+/// formatting/structure (Bullets / Email / Summary). The split mirrors the
+/// `ActionMenuStyle` enum order — first 4 cases on top, remaining on bottom,
+/// centered. If we ever add another style, slot it in the appropriate row.
 struct ActionMenuView: View {
     let onChoice: (ActionMenuStyle) -> Void
 
+    private static let topRow: [ActionMenuStyle] = [.grammar, .personal, .formal, .shorter]
+    private static let bottomRow: [ActionMenuStyle] = [.bulletList, .email, .summarize]
+
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(ActionMenuStyle.allCases) { style in
-                ActionButton(style: style, onTap: { onChoice(style) })
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                ForEach(Self.topRow) { style in
+                    ActionButton(style: style, onTap: { onChoice(style) })
+                }
             }
+            HStack(spacing: 6) {
+                ForEach(Self.bottomRow) { style in
+                    ActionButton(style: style, onTap: { onChoice(style) })
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -16,6 +16,8 @@ struct HelpCheatSheetView: View {
 
                 section(title: "Activation") {
                     row(hotkeyLabel, "Start / stop dictation in any app")
+                    row("Hold \(hotkeyLabel) + Shift", "Dictate, then pick a transformation from the action menu")
+                    row("Quick tap \(hotkeyLabel) + Shift (within 5s of a paste)", "Refine the previous output — opens the action menu against the last paste, no new dictation")
                     row("Right-click menu bar icon", "Status, History, Settings, Quit")
                 }
 
@@ -24,6 +26,17 @@ struct HelpCheatSheetView: View {
                     row("Text selected", "Edit: speech becomes an instruction to rewrite the selection")
                     row("\"bullet list:\", \"email:\", etc.", "Command: formatted output")
                     row("\"insert <trigger>\"", "Snippet: pastes the expansion directly, no LLM")
+                }
+
+                section(title: "Action menu (Right Option + Shift)") {
+                    row("Grammar", "Fix L2 / non-native errors, preserve voice")
+                    row("Personal", "Casual / friendly conversational rewrite")
+                    row("Formal", "Polished professional rewrite")
+                    row("Shorter", "Concise rewrite, ~half length")
+                    row("Bullets", "Convert to bulleted list, parallel structure")
+                    row("Email", "Wrap in greeting + body + sign-off")
+                    row("Summary", "2–3 sentence summary, key ideas only")
+                    row("Esc", "Cancel — no paste")
                 }
 
                 section(title: "Windows") {

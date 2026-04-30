@@ -20,8 +20,9 @@ final class ActionMenuController {
     private var escMonitorLocal: Any?
     private var escMonitorGlobal: Any?
 
-    // Match the HUD's panel size + position so we can sit above it cleanly.
-    private let menuSize = NSSize(width: 360, height: 80)
+    // Two rows of buttons (4 + 3) — height = 2×56 button + 6 inter-row gap +
+    // 8×2 panel padding + a little breathing room.
+    private let menuSize = NSSize(width: 360, height: 144)
     private let hudHeight: CGFloat = 80
     private let hudBottomMargin: CGFloat = 24
     private let gapAboveHUD: CGFloat = 12

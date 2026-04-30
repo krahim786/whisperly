@@ -83,6 +83,20 @@ final class AppState: ObservableObject {
     /// window, stays true even if Shift is released early.
     private var wantsActionMenu: Bool = false
 
+    /// Snapshot of the most recent paste, used by the quick-refine flow.
+    /// A short Right-Option-+-Shift tap (held < `minimumHoldDuration`) within
+    /// `refineWindow` of the snapshot's timestamp opens the action menu
+    /// against this text instead of starting a new dictation. Cleared
+    /// implicitly by being older than the window — we just check the
+    /// timestamp at use time.
+    private struct PasteSnapshot {
+        let text: String
+        let appName: String
+        let timestamp: Date
+    }
+    private var lastPasteSnapshot: PasteSnapshot?
+    private let refineWindow: TimeInterval = 5.0
+
     /// Local + global flagsChanged monitors active only while the hotkey is
     /// held — they set `wantsActionMenu = true` if Shift becomes held mid-
     /// recording, and update the HUD subtitle so the user gets visual
@@ -344,6 +358,31 @@ final class AppState: ObservableObject {
         let held = pressedAt.map { Date().timeIntervalSince($0) } ?? 0
 
         if held < minimumHoldDuration {
+            // Quick refine intent: a short tap of Right Option + Shift within
+            // `refineWindow` seconds of the most recent paste opens the action
+            // menu against the previous output, with no new dictation. The
+            // user can chain refines (each refine updates lastPasteSnapshot
+            // so the next quick tap operates on the just-refined text).
+            if wantsActionMenu, isRefineWindowActive() {
+                logger.info("Quick Right Option + Shift tap within refine window — opening refine menu.")
+                FileLogger.shared.write(category: "AppState", level: "info", "Refine triggered")
+                recorder.cancel()
+                speech.stop()
+                pendingSelectionFallback?.cancel()
+                pendingSelectionFallback = nil
+                tearDownShiftMonitor()
+                liveTranscript = ""
+                wantsActionMenu = false
+                phase = .idle
+                modeDisplay = nil
+
+                inFlightTask?.cancel()
+                inFlightTask = Task { [weak self] in
+                    await self?.runRefinePipeline()
+                }
+                return
+            }
+
             logger.info("Hold duration \(String(format: "%.3f", held))s under threshold — cancelling.")
             recorder.cancel()
             speech.stop()
@@ -475,11 +514,13 @@ final class AppState: ObservableObject {
                 FileLogger.shared.write(category: "AppState", level: "error", "Haiku transform failed: \(error.localizedDescription)")
                 phase = .pasting
                 await inserter.paste(transcript)
+                recordPaste(text: transcript, appName: appName)
                 flashWarning("\(style.label) failed — \(error.localizedDescription)")
                 return
             }
             phase = .pasting
             await inserter.paste(cleaned)
+            recordPaste(text: cleaned, appName: appName)
             phase = .idle
             modeDisplay = nil
             await logHistory(
@@ -506,6 +547,7 @@ final class AppState: ObservableObject {
                 logger.info("Offline + snippet matched: \(snippet.trigger, privacy: .public)")
                 phase = .pasting
                 await inserter.paste(snippet.expansion)
+                recordPaste(text: snippet.expansion, appName: appName)
                 phase = .idle
                 modeDisplay = nil
                 snippets.recordUse(id: snippet.id)
@@ -531,6 +573,7 @@ final class AppState: ObservableObject {
             // Dictation / command / translation all paste raw locally.
             phase = .pasting
             await inserter.paste(transcript)
+            recordPaste(text: transcript, appName: appName)
             phase = .idle
             modeDisplay = nil
             await logHistory(
@@ -561,11 +604,13 @@ final class AppState: ObservableObject {
                 FileLogger.shared.write(category: "AppState", level: "error", "Haiku translate failed: \(error.localizedDescription)")
                 phase = .pasting
                 await inserter.paste(transcript)
+                recordPaste(text: transcript, appName: appName)
                 flashWarning("Translation skipped — \(error.localizedDescription)")
                 return
             }
             phase = .pasting
             await inserter.paste(cleaned)
+            recordPaste(text: cleaned, appName: appName)
             phase = .idle
             modeDisplay = nil
             await logHistory(
@@ -585,6 +630,7 @@ final class AppState: ObservableObject {
             logger.info("Snippet matched: \(snippet.trigger, privacy: .public) → \(snippet.expansion.count, privacy: .public) chars")
             phase = .pasting
             await inserter.paste(snippet.expansion)
+            recordPaste(text: snippet.expansion, appName: appName)
             phase = .idle
             modeDisplay = nil
             snippets.recordUse(id: snippet.id)
@@ -638,8 +684,10 @@ final class AppState: ObservableObject {
             switch cycleMode {
             case .dictation:
                 await inserter.paste(transcript)
+                recordPaste(text: transcript, appName: appName)
             case .edit(let selection):
                 await inserter.replaceSelection(with: selection)
+                recordPaste(text: selection, appName: appName)
             }
             flashWarning("Polish skipped — \(error.localizedDescription)")
             return
@@ -653,6 +701,7 @@ final class AppState: ObservableObject {
         case .edit:
             await inserter.replaceSelection(with: cleaned)
         }
+        recordPaste(text: cleaned, appName: appName)
         phase = .idle
         modeDisplay = nil
 
@@ -726,6 +775,83 @@ final class AppState: ObservableObject {
             // the water if the user clears their key while offline.)
             return true
         }
+    }
+
+    // MARK: - Refine
+
+    /// True if a recent paste exists and is still within the refine window.
+    private func isRefineWindowActive() -> Bool {
+        guard let snap = lastPasteSnapshot else { return false }
+        return Date().timeIntervalSince(snap.timestamp) < refineWindow
+    }
+
+    /// Record the most recent paste so a subsequent quick refine can target
+    /// it. Called at every paste site in the pipeline (cleanup, edit, command,
+    /// translation, snippet, action-menu, offline-fallback, refine itself).
+    /// Updating after every paste — including refines — lets the user chain
+    /// refines: each one becomes the new baseline.
+    private func recordPaste(text: String, appName: String) {
+        lastPasteSnapshot = PasteSnapshot(text: text, appName: appName, timestamp: Date())
+    }
+
+    /// Show the action menu against `lastPasteSnapshot.text`, run the chosen
+    /// transformation, and replace the previous paste in the target app via
+    /// ⌘Z + ⌘V. Triggered from `onHotkeyReleased` when it detects a short
+    /// Option+Shift tap within `refineWindow` of the latest paste.
+    private func runRefinePipeline() async {
+        guard let snapshot = lastPasteSnapshot else {
+            logger.warning("runRefinePipeline called with no snapshot — skipping.")
+            phase = .idle
+            modeDisplay = nil
+            return
+        }
+
+        phase = .cleaning
+        modeDisplay = "Refine"
+
+        let chosen = await actionMenu.choose()
+        guard let style = chosen else {
+            logger.info("Refine cancelled — no replacement.")
+            phase = .idle
+            modeDisplay = nil
+            return
+        }
+
+        let dictionaryJSON = dictionary.jsonForPrompt()
+        let cleaned: String
+        do {
+            cleaned = try await haikuWithRetry { [haiku, snapshot, dictionaryJSON] in
+                try await haiku.transform(
+                    transcript: snapshot.text,
+                    style: style,
+                    appName: snapshot.appName,
+                    dictionaryJSON: dictionaryJSON
+                )
+            }
+        } catch {
+            logger.error("Haiku refine (\(style.rawValue, privacy: .public)) failed. Error: \(error.localizedDescription, privacy: .public)")
+            FileLogger.shared.write(category: "AppState", level: "error", "Refine failed: \(error.localizedDescription)")
+            flashWarning("Refine failed — \(error.localizedDescription)")
+            return
+        }
+
+        phase = .pasting
+        await inserter.replacePreviousPaste(with: cleaned)
+        phase = .idle
+        modeDisplay = nil
+
+        // Update the snapshot so the user can chain another refine against
+        // the just-refined text.
+        recordPaste(text: cleaned, appName: snapshot.appName)
+
+        await logHistory(
+            mode: .command,
+            appName: snapshot.appName,
+            rawTranscript: snapshot.text,
+            cleanedText: cleaned,
+            selectionInput: nil,
+            holdDuration: 0
+        )
     }
 
     /// Wraps a Haiku call with one retry on rate-limit. After 1 second we try

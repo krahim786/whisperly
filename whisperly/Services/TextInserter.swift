@@ -30,6 +30,40 @@ final class TextInserter {
         await paste(text)
     }
 
+    /// Replace whatever Whisperly pasted last by posting ⌘Z to undo the
+    /// previous paste in the target app, then pasting `text` in its place.
+    /// Used by the quick-refine flow: tap Right Option + Shift within 5s of
+    /// a paste → action menu → pick a style → this method swaps the result.
+    ///
+    /// Caveat: macOS apps' undo stacks aren't a stable contract. If the user
+    /// typed *anything* in the target app between the prior paste and this
+    /// call, ⌘Z undoes that typing first, not our paste. The 5s refine
+    /// window mitigates in practice; users rarely type within that window.
+    /// The alternative — selecting the previous range and replacing — would
+    /// need an AX read of cursor/selection ranges per app, which Electron
+    /// breaks. ⌘Z + paste is the pragmatic v1.
+    func replacePreviousPaste(with text: String) async {
+        guard !text.isEmpty else { return }
+
+        let trustedPrompt = AXIsProcessTrustedWithOptions(nil)
+        if !trustedPrompt {
+            onAccessibilityRevoked?()
+            return
+        }
+
+        // Undo the previous paste in the target app's undo stack.
+        postCmdZ()
+        // Wait long enough for the target app to process the undo before
+        // we start the replacement-paste — different apps have different
+        // undo latencies, 80ms is generous but not perceptible.
+        try? await Task.sleep(nanoseconds: 80_000_000)
+
+        // Now paste the refined text via the existing paste path. The AX
+        // check inside paste() is redundant after our check above, but
+        // belt-and-braces is fine.
+        await paste(text)
+    }
+
     func paste(_ text: String) async {
         guard !text.isEmpty else { return }
 
@@ -99,6 +133,17 @@ final class TextInserter {
         down?.post(tap: .cghidEventTap)
 
         let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
+        up?.flags = .maskCommand
+        up?.post(tap: .cghidEventTap)
+    }
+
+    private func postCmdZ() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_Z), keyDown: true)
+        down?.flags = .maskCommand
+        down?.post(tap: .cghidEventTap)
+
+        let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_Z), keyDown: false)
         up?.flags = .maskCommand
         up?.post(tap: .cghidEventTap)
     }

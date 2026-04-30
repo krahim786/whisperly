@@ -2,12 +2,18 @@ import Foundation
 
 /// Transformations the user can pick from the post-dictation action menu
 /// (triggered by holding Right Option + Shift while speaking). Order here
-/// drives the visual order in the menu.
+/// drives the visual order in the menu — first 4 are tone/grammar, last 3
+/// are formatting/structure, and the menu UI splits them across two rows.
 nonisolated enum ActionMenuStyle: String, CaseIterable, Identifiable, Sendable {
+    // Row 1 — tone / grammar
     case grammar
     case personal
     case formal
     case shorter
+    // Row 2 — formatting / structure
+    case bulletList
+    case email
+    case summarize
 
     var id: String { rawValue }
 
@@ -17,6 +23,9 @@ nonisolated enum ActionMenuStyle: String, CaseIterable, Identifiable, Sendable {
         case .personal: return "Personal"
         case .formal: return "Formal"
         case .shorter: return "Shorter"
+        case .bulletList: return "Bullets"
+        case .email: return "Email"
+        case .summarize: return "Summary"
         }
     }
 
@@ -27,6 +36,9 @@ nonisolated enum ActionMenuStyle: String, CaseIterable, Identifiable, Sendable {
         case .personal: return "person.crop.circle"
         case .formal: return "briefcase"
         case .shorter: return "arrow.down.right.and.arrow.up.left"
+        case .bulletList: return "list.bullet"
+        case .email: return "envelope"
+        case .summarize: return "doc.text"
         }
     }
 
@@ -42,6 +54,12 @@ nonisolated enum ActionMenuStyle: String, CaseIterable, Identifiable, Sendable {
             return "Rewrite in a polished, professional, formal tone — like a business email to a colleague. Tighten casual phrasing, prefer complete sentences, remove contractions where natural. Preserve the meaning and roughly the length."
         case .shorter:
             return "Rewrite to be roughly half the length while preserving the core meaning. Cut filler, redundancy, hedging, and side commentary. Keep the same prose form — don't summarize into bullets or headlines."
+        case .bulletList:
+            return "Convert into a bulleted list. Each bullet captures one distinct idea, with parallel grammatical structure (e.g. all start with verbs, or all are noun phrases). Preserve every meaningful idea from the source — don't summarize. Use markdown bullets ('- ') unless the target app uses a different convention (Notes / Pages render '•', code editors keep '-'). One bullet per line, no introductory sentence."
+        case .email:
+            return "Rewrite as a polished email body. Begin with a brief greeting ('Hi,' if no recipient name is clearly implied), use proper sentences and paragraph breaks, end with a brief sign-off ('Thanks,' or 'Best,' as appropriate to the tone). Don't invent specific recipient or sender names. Preserve the user's intended message and approximate length."
+        case .summarize:
+            return "Summarize into 2-3 sentences capturing the core ideas. Drop secondary details, examples, and side commentary. Keep the user's voice and conclusions intact. The result should be substantially shorter than the source — aim for 25-40% of the original length."
         }
     }
 }
