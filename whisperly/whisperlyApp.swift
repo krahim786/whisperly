@@ -144,7 +144,7 @@ struct whisperlyApp: App {
         .windowResizability(.contentSize)
 
         Window("About Whisperly", id: "about") {
-            AboutView()
+            AboutView(updates: updateService)
         }
         .windowResizability(.contentSize)
 

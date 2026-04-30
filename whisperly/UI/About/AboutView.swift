@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct AboutView: View {
+    @ObservedObject var updates: UpdateService
     @Environment(\.openURL) private var openURL
 
     private var version: String {
@@ -12,7 +13,7 @@ struct AboutView: View {
     }
 
     var body: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 16) {
             // Uses the app's bundled icon (the one in Assets.xcassets/AppIcon).
             // Falls back to an SF Symbol if the icon image isn't available
             // (e.g. running unbundled in a SwiftUI preview).
@@ -44,6 +45,8 @@ struct AboutView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
 
+            updatesSection
+
             HStack(spacing: 24) {
                 Button("Privacy") {
                     if let url = Self.privacyDocURL { openURL(url) }
@@ -64,7 +67,59 @@ struct AboutView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(28)
-        .frame(width: 420, height: 360)
+        .frame(width: 440, height: 440)
+    }
+
+    /// Updates section — last-check date on the left, manual-check button on
+    /// the right. The button reflects `canCheckForUpdates` so it disables
+    /// while a check is in flight. A subtle warning replaces the date when
+    /// the appcast feed URL hasn't been configured yet (placeholder Info.plist
+    /// value), so users on a dev build know auto-update isn't actually wired.
+    private var updatesSection: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.tint)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Updates")
+                    .font(.subheadline.weight(.medium))
+                Text(updatesCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            Spacer()
+
+            Button("Check Now") {
+                updates.checkForUpdates()
+            }
+            .disabled(!updates.canCheckForUpdates || !updates.isFeedConfigured)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.regularMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(.white.opacity(0.05), lineWidth: 1)
+        )
+        .frame(maxWidth: 360)
+    }
+
+    private var updatesCaption: String {
+        if !updates.isFeedConfigured {
+            return "Auto-update isn't configured for this build."
+        }
+        if let last = updates.lastCheckDateText {
+            return "Last checked \(last)"
+        }
+        return "Never checked — click to look for updates"
     }
 
     /// Resolves the bundled `PRIVACY.md` if present (Day 7 ships it at the
@@ -84,5 +139,5 @@ extension Notification.Name {
 }
 
 #Preview {
-    AboutView()
+    AboutView(updates: UpdateService())
 }
