@@ -373,8 +373,16 @@ final class AppState: ObservableObject {
                 tearDownShiftMonitor()
                 liveTranscript = ""
                 wantsActionMenu = false
-                phase = .idle
-                modeDisplay = nil
+                // Deliberately do NOT set phase = .idle here. That would
+                // trigger HUDController.hide() and start a fade-out, then
+                // runRefinePipeline would immediately set phase = .cleaning
+                // and fire show(). The two animations starting < 1 frame
+                // apart is the source of the "HUD stops appearing after
+                // a while of use" bug — most cycles resolve, but eventually
+                // the SwiftUI .blur @State and the panel alpha desync.
+                // Leave phase = .recording; runRefinePipeline transitions
+                // to .cleaning directly, so the HUD stays visible across
+                // the recording → refine handoff with a single phase event.
 
                 inFlightTask?.cancel()
                 inFlightTask = Task { [weak self] in
