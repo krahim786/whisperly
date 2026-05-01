@@ -6,6 +6,26 @@
         <description>Most recent updates to Whisperly.</description>
         <language>en</language>
         <item>
+            <title>Version 1.7</title>
+            <pubDate>Fri, 01 May 2026 00:32:55 +0000</pubDate>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>1.7</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+                <ul>
+                    <li><strong>Three new action menu styles</strong> — alongside Grammar / Personal / Formal / Shorter, the menu now offers <em>Bullets</em> (parallel-structure bulleted list, no summarization), <em>Email</em> (greeting + paragraphs + sign-off, no invented names), and <em>Summary</em> (2–3 sentences, 25–40% of original length, voice preserved). Layout is now two rows of buttons.</li>
+                    <li><strong>Quick refine after paste</strong> — within 5 seconds of any paste, a quick tap of Right Option + Shift (held under 0.2s) reopens the action menu against the previous output instead of starting a new dictation. Pick a style → Haiku transforms in place via ⌘Z + ⌘V. Refines chain, so a second tap operates on the just-refined text.</li>
+                    <li><strong>Updates section in the About window</strong> — surfaces the same Sparkle Check-Now button that lives in Settings, with a "last checked" caption, so update controls are reachable from the obvious spot.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/krahim786/whisperly/releases/download/v1.7/Whisperly-local.dmg"
+                sparkle:edSignature="/60udttNjxM35BQbWl1OUA8LsDTzJIAUW1qT3nDPCid+PRxQisAYTdyOjUeTL0BliZT6zzs3B5CBCXUPrwDpAA=="
+                length="7542478"
+                type="application/octet-stream"
+            />
+        </item>
+        <item>
             <title>Version 1.6.1</title>
             <pubDate>Wed, 29 Apr 2026 23:51:40 +0000</pubDate>
             <sparkle:version>8</sparkle:version>
