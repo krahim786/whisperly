@@ -58,62 +58,61 @@ final class HUDController {
 
     // MARK: - Show / Hide
 
+    /// Bring the panel onscreen. The actual fade-in is driven entirely by
+    /// SwiftUI inside `HUDView` (via `.opacity` and `.blur` keyed on
+    /// `appState.phase`); we just need the window to exist on the screen
+    /// list so SwiftUI has somewhere to render to. The panel's `alphaValue`
+    /// is held at 1 forever — no Core Animation on the AppKit side.
+    ///
+    /// History: an earlier design animated `panel.animator().alphaValue` in
+    /// parallel with the SwiftUI blur. Two animation systems observing the
+    /// same `phase` publisher had no shared clock. They mostly stayed in
+    /// sync, but over enough rapid cycles the SwiftUI .blur @State could
+    /// fall out of sync with the panel alpha — eventually leaving the HUD
+    /// "invisible after a while of use." Collapsing both into one SwiftUI
+    /// animation eliminates the race.
     private func show() {
         guard config.showHUD else { return }
         let panel = ensurePanel()
         positionPanel(panel)
 
-        // Cancel any in-flight hide-out task so a quick re-press during fade-out
-        // doesn't leave the panel half-faded.
+        // Cancel any in-flight delayed orderOut so a quick re-press during
+        // the disappear animation doesn't retire the panel out from under us.
         hideTask?.cancel()
         hideTask = nil
 
-        // Bring the panel on-screen if a previous hide() ordered it out.
+        // Force alpha to 1 — defensive against anything that may have left
+        // it at 0 (older builds, future regressions). With this set the
+        // panel content's visibility is purely a function of SwiftUI's
+        // .opacity, which is keyed on appState.phase.
+        panel.alphaValue = 1
+
         // orderFrontRegardless avoids activating the app, preserving the
-        // user's frontmost text editor.
+        // user's frontmost text editor as key.
         if !panel.isVisible {
             panel.orderFrontRegardless()
         }
-
-        // ALWAYS animate alphaValue to 1 via .animator() — robust against
-        // every prior state in one motion:
-        //   - fresh show after orderOut (alpha left at 0 by previous hide)
-        //   - already visible at alpha=1 (no-op animation)
-        //   - mid-fade-out (the new .animator() set supersedes the in-flight
-        //     hide animation; without this, hide's animation kept driving
-        //     toward 0 and the panel ended up invisible — the bug where
-        //     "everything works but no HUD shows up after a few cycles")
-        // Mirror HUDView.appearAnimation so blur + alpha land together.
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.40
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 1
-        }
     }
 
+    /// Schedule the panel to leave the screen list once SwiftUI's fade-out
+    /// has visually completed. We don't animate alpha here — SwiftUI's
+    /// `.opacity` keyed on `phase == .idle` does the visible work. We just
+    /// wait the disappear duration plus a small buffer, then `orderOut`
+    /// (and only if the phase is still .idle — a rapid re-press cancels).
     private func hide() {
         guard let panel = self.panel, panel.isVisible else { return }
-        // SwiftUI inside the panel animates blurRadius to 24 over 0.18s on
-        // its own (HUDView observes phase). We mirror with an alpha fade
-        // here, then orderOut on completion so the resources release.
         let panelRef = panel
         hideTask?.cancel()
-        let task = Task { @MainActor in
-            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                NSAnimationContext.runAnimationGroup({ ctx in
-                    // Mirror HUDView.disappearAnimation.
-                    ctx.duration = 0.32
-                    ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
-                    panelRef.animator().alphaValue = 0
-                }, completionHandler: {
-                    cont.resume()
-                })
-            }
-            // If show() ran during the fade and reset alpha to 1, don't
-            // hide. Otherwise, retire the panel.
-            if !Task.isCancelled, panelRef.alphaValue == 0 {
-                panelRef.orderOut(nil)
-            }
+        // Sleep a touch longer than the SwiftUI disappear animation so we
+        // never orderOut mid-fade. 50 ms buffer is imperceptible.
+        let waitNanos = HUDView.disappearNanoseconds + 50_000_000
+        let task = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: waitNanos)
+            guard !Task.isCancelled, let self else { return }
+            // If a new dictation kicked off during the fade, phase is no
+            // longer .idle and the user expects to see the HUD — keep it.
+            guard self.appState.phase == .idle else { return }
+            panelRef.orderOut(nil)
         }
         hideTask = task
     }
