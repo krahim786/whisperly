@@ -7,14 +7,33 @@ import SwiftUI
 struct HUDView: View {
     @ObservedObject var appState: AppState
 
-    /// Animated blur radius. Starts at the "blurred-out" target so the very
-    /// first appearance animates *into* clarity rather than snapping.
-    @State private var blurRadius: CGFloat = 24
-
-    // Durations are mirrored in HUDController.show/hide so the SwiftUI blur
-    // and the panel's alphaValue fade in/out together. Bump them in lockstep.
+    // SwiftUI is the single source of truth for the show/hide animation
+    // (see HUDController for the rationale). Both blur and opacity are
+    // computed directly from `appState.phase`; the `.animation(_:value:)`
+    // modifier interpolates them automatically when the phase changes —
+    // no @State, no .onChange, nothing that can desync from the model.
+    //
+    // Why this matters: the previous design had @State blurRadius driven
+    // by .onChange(of: phase), running in parallel with HUDController's
+    // own panel.alphaValue animation. Two animation systems observing the
+    // same publisher had no common clock; over enough cycles SwiftUI's
+    // view-diffing-based .onChange could miss a transition (especially
+    // when the hosting view's render loop was paused after orderOut),
+    // leaving blurRadius stuck at 24 even after the panel re-appeared —
+    // i.e. "the HUD stops working after a while of use."
     private static let appearAnimation: Animation = .easeOut(duration: 0.40)
     private static let disappearAnimation: Animation = .easeIn(duration: 0.32)
+
+    /// Hide-duration in nanoseconds, exposed for HUDController to schedule
+    /// its orderOut. Keep in lockstep with `disappearAnimation`.
+    static let disappearNanoseconds: UInt64 = 320_000_000
+
+    private var isHidden: Bool { appState.phase == .idle }
+    private var blurAmount: CGFloat { isHidden ? 24 : 0 }
+    private var contentOpacity: Double { isHidden ? 0 : 1 }
+    private var transitionAnimation: Animation {
+        isHidden ? Self.disappearAnimation : Self.appearAnimation
+    }
 
     var body: some View {
         HStack(spacing: 18) {
@@ -55,23 +74,9 @@ struct HUDView: View {
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(pillBackground)
-        .blur(radius: blurRadius)
-        .onAppear {
-            // First mount usually happens with phase already non-idle (the
-            // HUDController orders the panel front in response to the same
-            // phase change). Animate from the blurred-out initial state to
-            // sharp.
-            if appState.phase != .idle {
-                withAnimation(Self.appearAnimation) { blurRadius = 0 }
-            }
-        }
-        .onChange(of: appState.phase) { _, newPhase in
-            if newPhase == .idle {
-                withAnimation(Self.disappearAnimation) { blurRadius = 24 }
-            } else if blurRadius > 0 {
-                withAnimation(Self.appearAnimation) { blurRadius = 0 }
-            }
-        }
+        .blur(radius: blurAmount)
+        .opacity(contentOpacity)
+        .animation(transitionAnimation, value: appState.phase)
     }
 
     // MARK: - Background
