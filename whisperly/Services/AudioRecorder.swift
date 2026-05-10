@@ -315,10 +315,21 @@ final class AudioRecorder: @unchecked Sendable {
         maxLengthTask?.cancel()
         maxLengthTask = nil
 
+        // Remove the tap unconditionally. If the engine self-stopped during a
+        // configuration-change (the input device renegotiated mid-session),
+        // `engine.isRunning` may already be false — but the tap is still
+        // installed on the input bus, and a follow-up `installTap` on the same
+        // bus will throw an Obj-C exception ("nullptr == Tap()") and take the
+        // process down. AVAudioEngine docs state removeTap is a no-op when no
+        // tap is present, so this is safe in either state.
+        engine.inputNode.removeTap(onBus: 0)
         if engine.isRunning {
-            engine.inputNode.removeTap(onBus: 0)
             engine.stop()
         }
+        // Clear DSP state so the next start() comes up from a known-good
+        // baseline. Cheap, and immune to any "engine ran into a bad state
+        // during the last session" scenarios.
+        engine.reset()
         audioFile = nil
         converter = nil
         processingFormat = nil
