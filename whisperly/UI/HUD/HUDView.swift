@@ -49,6 +49,16 @@ struct HUDView: View {
                         .lineLimit(2)
                         .truncationMode(.head)
                         .animation(.easeOut(duration: 0.12), value: appState.liveTranscript)
+                } else if case .error = appState.phase {
+                    // Drop the header to a smaller weight in error state so the
+                    // actual error message has room to breathe — the 22pt
+                    // "Error" label was eating ~half the pill's vertical
+                    // space, forcing a long message like "Audio interrupted —
+                    // try again." into a single tail-truncated line.
+                    Text(stateText)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
                 } else {
                     Text(stateText)
                         .font(.system(size: 22, weight: .semibold, design: .rounded))
@@ -57,10 +67,11 @@ struct HUDView: View {
                 }
                 if case .error(let message) = appState.phase {
                     Text(message)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .lineLimit(2)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(3)
                         .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else if let mode = appState.modeDisplay {
                     Text(mode)
                         .font(.system(size: 11, weight: .medium))

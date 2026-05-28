@@ -105,6 +105,18 @@ final class AppState: ObservableObject {
     private var shiftMonitorLocal: Any?
     private var shiftMonitorGlobal: Any?
 
+    /// Wall-clock time at which the current recording started. Used to filter
+    /// out spurious `AVAudioEngineConfigurationChange` notifications fired by
+    /// the engine itself during startup (sample-rate negotiation with the input
+    /// device). Apple's docs describe configuration-change as a signal to
+    /// re-query the input format, not necessarily a fatal interruption — and
+    /// in practice it almost always fires once during the first ~half-second
+    /// after `engine.start()`. A real device change (headphones unplugged
+    /// mid-sentence, etc.) fires it again later, which we still honour. Reset
+    /// to nil whenever the pipeline leaves the recording phase.
+    private var recordingStartedAt: Date?
+    private let configChangeGraceWindow: TimeInterval = 1.0
+
     /// Async task for the Cmd+C selection fallback, in case AX selection-reading
     /// fails (e.g. Electron). Awaited before the pipeline routes to edit/dictation.
     private var pendingSelectionFallback: Task<String?, Never>?
@@ -197,7 +209,7 @@ final class AppState: ObservableObject {
 
         NotificationCenter.default.publisher(for: .AVAudioEngineConfigurationChange)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.handleAudioInterruption(reason: "audio device changed") }
+            .sink { [weak self] _ in self?.handleConfigurationChange() }
             .store(in: &cancellables)
 
         // Re-check Accessibility trust whenever the app comes to foreground,
@@ -325,6 +337,7 @@ final class AppState: ObservableObject {
         }
 
         pressedAt = Date()
+        recordingStartedAt = Date()
         amplitudeHistory.removeAll(keepingCapacity: true)
         liveTranscript = ""
         phase = .recording
@@ -343,6 +356,17 @@ final class AppState: ObservableObject {
                 try await recorder.startRecording()
             } catch {
                 await MainActor.run {
+                    // Recorder couldn't even start (typical: AudioRecorderError
+                    // .audioInputNotReady on a Bluetooth device that hasn't
+                    // finished its profile switch). Tear down the bits we
+                    // already wired up on press — speech recognizer, shift
+                    // monitor, selection-fallback — and surface the message.
+                    self.speech.stop()
+                    self.tearDownShiftMonitor()
+                    self.pendingSelectionFallback?.cancel()
+                    self.pendingSelectionFallback = nil
+                    self.recordingStartedAt = nil
+                    self.liveTranscript = ""
                     self.flashError(error.localizedDescription)
                 }
             }
@@ -371,6 +395,7 @@ final class AppState: ObservableObject {
                 pendingSelectionFallback?.cancel()
                 pendingSelectionFallback = nil
                 tearDownShiftMonitor()
+                recordingStartedAt = nil
                 liveTranscript = ""
                 wantsActionMenu = false
                 // Deliberately do NOT set phase = .idle here. That would
@@ -397,6 +422,7 @@ final class AppState: ObservableObject {
             pendingSelectionFallback?.cancel()
             pendingSelectionFallback = nil
             tearDownShiftMonitor()
+            recordingStartedAt = nil
             phase = .idle
             modeDisplay = nil
             liveTranscript = ""
@@ -414,6 +440,10 @@ final class AppState: ObservableObject {
     }
 
     private func runPipeline(holdDuration: TimeInterval) async {
+        // We're past the recording window; configuration-change notifications
+        // are no longer relevant to the in-flight cycle.
+        recordingStartedAt = nil
+
         // Stop the live recognizer immediately on release. Whisper takes over
         // for the canonical transcription; the partial preview is no longer
         // useful past this point.
@@ -886,8 +916,30 @@ final class AppState: ObservableObject {
         pendingSelectionFallback?.cancel()
         pendingSelectionFallback = nil
         tearDownShiftMonitor()
+        recordingStartedAt = nil
         liveTranscript = ""
-        flashError("Recording interrupted (\(reason)).")
+        flashError("Audio interrupted — try again.")
+    }
+
+    /// `AVAudioEngineConfigurationChange` handler. The notification fires
+    /// during normal engine startup (sample-rate negotiation), and previously
+    /// we always treated it as a fatal interruption — which silently killed
+    /// the user's first dictation on a fresh install. Now we only treat it as
+    /// real if it lands outside the post-start grace window.
+    private func handleConfigurationChange() {
+        guard phase == .recording else { return }
+        if let started = recordingStartedAt,
+           Date().timeIntervalSince(started) < configChangeGraceWindow {
+            // Almost certainly the engine's own startup chatter — log and ignore.
+            logger.info("Ignoring AVAudioEngineConfigurationChange during start-up grace window.")
+            FileLogger.shared.write(
+                category: "AppState",
+                level: "info",
+                "Configuration change ignored (within \(configChangeGraceWindow)s of start)"
+            )
+            return
+        }
+        handleAudioInterruption(reason: "audio device changed")
     }
 
     // MARK: - History

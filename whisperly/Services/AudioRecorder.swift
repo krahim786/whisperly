@@ -9,6 +9,13 @@ enum AudioRecorderError: LocalizedError {
     case noActiveRecording
     case converterUnavailable
     case noSpeechDetected
+    /// The OS reported the input bus in a half-baked state (zero sample rate
+    /// or zero channels) when we tried to start recording. With Bluetooth this
+    /// happens during the A2DP→HFP profile switch — the mic isn't actually
+    /// available for ~100-500 ms after the user hits the hotkey. We bail
+    /// cleanly here instead of letting the bad format reach `installTap`,
+    /// which would raise an Obj-C exception and abort the process.
+    case audioInputNotReady(sampleRate: Double, channelCount: AVAudioChannelCount)
 
     var errorDescription: String? {
         switch self {
@@ -17,6 +24,8 @@ enum AudioRecorderError: LocalizedError {
         case .noActiveRecording: return "No recording in progress."
         case .converterUnavailable: return "Couldn't create audio converter."
         case .noSpeechDetected: return "No speech detected."
+        case .audioInputNotReady:
+            return "Mic not ready — if you just connected Bluetooth, give it a second and try again."
         }
     }
 }
@@ -41,6 +50,11 @@ final class AudioRecorder: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.karim.whisperly.audio")
     private var audioFile: AVAudioFile?
     private var converter: AVAudioConverter?
+    /// The format `converter` was created against. Used to detect mid-stream
+    /// format changes — with Bluetooth the bus can renegotiate after the first
+    /// few buffers, at which point we rebuild the converter rather than feeding
+    /// the old one buffers it can't decode.
+    private var converterInputFormat: AVAudioFormat?
     private var processingFormat: AVAudioFormat?
     private var currentURL: URL?
     private var isRecording = false
@@ -164,19 +178,44 @@ final class AudioRecorder: @unchecked Sendable {
 
     private func beginRecordingOnQueue() throws {
         let inputNode = engine.inputNode
+
+        // `engine.prepare()` BEFORE reading the input format. Prepare commits
+        // the engine's audio path with the hardware, which is what forces the
+        // OS to finish negotiating the Bluetooth profile (A2DP → HFP/HSP for
+        // headsets with mic). Without this, `outputFormat(forBus:)` often
+        // returns a half-baked format with the right sample rate but zero
+        // channels — and passing that to `installTap` raises an Obj-C
+        // exception inside AVFoundation that Swift can't catch, aborting the
+        // process.
+        engine.prepare()
+
         let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0 else {
-            throw NSError(domain: "Whisperly.AudioRecorder", code: -1, userInfo: [NSLocalizedDescriptionKey: "Input format has zero sample rate (no mic?)"])
+
+        // Tightened validation: with Bluetooth we've seen formats come back
+        // with sampleRate==16000 but channelCount==0 during the profile-switch
+        // window. Both have to be non-zero or installTap will throw.
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            logger.warning(
+                "Input format not ready (sr=\(inputFormat.sampleRate, privacy: .public), ch=\(inputFormat.channelCount, privacy: .public)) — bailing before installTap."
+            )
+            throw AudioRecorderError.audioInputNotReady(
+                sampleRate: inputFormat.sampleRate,
+                channelCount: inputFormat.channelCount
+            )
         }
 
         guard let proc = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false) else {
             throw AudioRecorderError.converterUnavailable
         }
+        self.processingFormat = proc
+        // Build the converter against the bus format we just read. It may get
+        // rebuilt inside the tap callback if the actual buffer format differs
+        // (Bluetooth can renegotiate after the engine starts).
         guard let conv = AVAudioConverter(from: inputFormat, to: proc) else {
             throw AudioRecorderError.converterUnavailable
         }
-        self.processingFormat = proc
         self.converter = conv
+        self.converterInputFormat = inputFormat
         self.vadHasFlushed = false
         self.vadRing.removeAll(keepingCapacity: true)
         self.receivedAnySpeech = false
@@ -201,17 +240,51 @@ final class AudioRecorder: @unchecked Sendable {
         self.audioFile = file
         self.currentURL = url
 
-        let captureConverter = conv
         let captureProc = proc
         let captureLogger = logger
         let captureQueue = queue
         let captureSubject = amplitudeSubject
 
         inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 4_096, format: inputFormat) { buffer, _ in
+        // Pass `nil` for the format instead of our measured `inputFormat`.
+        // AVFoundation's docs say nil means "use the bus's current format",
+        // which avoids the strict format-equality check inside installTap
+        // that's been throwing on Bluetooth. We adapt to whatever format
+        // actually arrives by (re)building the converter inside the callback.
+        inputNode.installTap(onBus: 0, bufferSize: 4_096, format: nil) { [weak self] buffer, _ in
+            guard let self else { return }
+
+            // Lazy / adaptive converter: if the buffer's format doesn't match
+            // what the converter was built for, rebuild it. Common with
+            // Bluetooth: the first few buffers come in at one sample rate /
+            // channel count, then the headset upgrades and subsequent buffers
+            // arrive in a different format. Without this, the converter would
+            // either error out every buffer or crash trying to read frames
+            // outside the expected layout.
+            let activeConverter: AVAudioConverter? = self.queue.sync {
+                if let existing = self.converter,
+                   let known = self.converterInputFormat,
+                   formatsEqual(known, buffer.format) {
+                    return existing
+                }
+                guard let rebuilt = AVAudioConverter(from: buffer.format, to: captureProc) else {
+                    captureLogger.error(
+                        "Failed to (re)build converter for buffer format sr=\(buffer.format.sampleRate, privacy: .public), ch=\(buffer.format.channelCount, privacy: .public)"
+                    )
+                    return nil
+                }
+                self.converter = rebuilt
+                self.converterInputFormat = buffer.format
+                captureLogger.info(
+                    "Converter rebuilt for new buffer format (sr=\(buffer.format.sampleRate, privacy: .public), ch=\(buffer.format.channelCount, privacy: .public))"
+                )
+                return rebuilt
+            }
+            guard let captureConverter = activeConverter else { return }
+
             // Audio thread: convert → emit RMS → hand off to serial queue.
             let outputFrameCount = AVAudioFrameCount(
-                Double(buffer.frameLength) * captureProc.sampleRate / buffer.format.sampleRate
+                Double(buffer.frameLength) * captureProc.sampleRate / max(buffer.format.sampleRate, 1)
             ) + 1024
             guard let outBuffer = AVAudioPCMBuffer(pcmFormat: captureProc, frameCapacity: outputFrameCount) else {
                 return
@@ -252,7 +325,6 @@ final class AudioRecorder: @unchecked Sendable {
             }
         }
 
-        engine.prepare()
         try engine.start()
         isRecording = true
         logger.info("Recording started → \(url.lastPathComponent, privacy: .public) (input: \(inputFormat.sampleRate, privacy: .public) Hz, \(inputFormat.channelCount, privacy: .public) ch)")
@@ -315,12 +387,24 @@ final class AudioRecorder: @unchecked Sendable {
         maxLengthTask?.cancel()
         maxLengthTask = nil
 
+        // Remove the tap unconditionally. If the engine self-stopped during a
+        // configuration-change (the input device renegotiated mid-session),
+        // `engine.isRunning` may already be false — but the tap is still
+        // installed on the input bus, and a follow-up `installTap` on the same
+        // bus will throw an Obj-C exception ("nullptr == Tap()") and take the
+        // process down. AVAudioEngine docs state removeTap is a no-op when no
+        // tap is present, so this is safe in either state.
+        engine.inputNode.removeTap(onBus: 0)
         if engine.isRunning {
-            engine.inputNode.removeTap(onBus: 0)
             engine.stop()
         }
+        // Clear DSP state so the next start() comes up from a known-good
+        // baseline. Cheap, and immune to any "engine ran into a bad state
+        // during the last session" scenarios.
+        engine.reset()
         audioFile = nil
         converter = nil
+        converterInputFormat = nil
         processingFormat = nil
         vadRing.removeAll(keepingCapacity: false)
         vadHasFlushed = false
@@ -385,4 +469,16 @@ final class AudioRecorder: @unchecked Sendable {
         }
         return (sum / Float(frameLength)).squareRoot()
     }
+}
+
+/// Compares two `AVAudioFormat` instances on the dimensions that matter for
+/// `AVAudioConverter` reuse: sample rate, channel count, and the common-format
+/// (Float32 vs Int16 etc.). `AVAudioFormat`'s built-in `isEqual` also compares
+/// channel-layout details which can spuriously differ across otherwise-
+/// compatible buffers from the same Bluetooth device, so this is a coarser
+/// "are these convertible the same way?" check.
+fileprivate func formatsEqual(_ a: AVAudioFormat, _ b: AVAudioFormat) -> Bool {
+    return a.sampleRate == b.sampleRate
+        && a.channelCount == b.channelCount
+        && a.commonFormat == b.commonFormat
 }
