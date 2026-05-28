@@ -356,6 +356,17 @@ final class AppState: ObservableObject {
                 try await recorder.startRecording()
             } catch {
                 await MainActor.run {
+                    // Recorder couldn't even start (typical: AudioRecorderError
+                    // .audioInputNotReady on a Bluetooth device that hasn't
+                    // finished its profile switch). Tear down the bits we
+                    // already wired up on press — speech recognizer, shift
+                    // monitor, selection-fallback — and surface the message.
+                    self.speech.stop()
+                    self.tearDownShiftMonitor()
+                    self.pendingSelectionFallback?.cancel()
+                    self.pendingSelectionFallback = nil
+                    self.recordingStartedAt = nil
+                    self.liveTranscript = ""
                     self.flashError(error.localizedDescription)
                 }
             }
