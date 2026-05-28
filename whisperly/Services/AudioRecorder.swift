@@ -16,6 +16,12 @@ enum AudioRecorderError: LocalizedError {
     /// cleanly here instead of letting the bad format reach `installTap`,
     /// which would raise an Obj-C exception and abort the process.
     case audioInputNotReady(sampleRate: Double, channelCount: AVAudioChannelCount)
+    /// `installTap` raised an Obj-C exception we caught via the WHTryBlock
+    /// bridge. Different from `audioInputNotReady` in that the format passed
+    /// validation in Swift but installTap still rejected it — typical when
+    /// the Bluetooth profile is mid-switch and the bus format flips between
+    /// our pre-validation read and AVFoundation's internal re-read.
+    case installTapFailed(reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +31,8 @@ enum AudioRecorderError: LocalizedError {
         case .converterUnavailable: return "Couldn't create audio converter."
         case .noSpeechDetected: return "No speech detected."
         case .audioInputNotReady:
+            return "Mic not ready — if you just connected Bluetooth, give it a second and try again."
+        case .installTapFailed:
             return "Mic not ready — if you just connected Bluetooth, give it a second and try again."
         }
     }
@@ -246,12 +254,10 @@ final class AudioRecorder: @unchecked Sendable {
         let captureSubject = amplitudeSubject
 
         inputNode.removeTap(onBus: 0)
-        // Pass `nil` for the format instead of our measured `inputFormat`.
-        // AVFoundation's docs say nil means "use the bus's current format",
-        // which avoids the strict format-equality check inside installTap
-        // that's been throwing on Bluetooth. We adapt to whatever format
-        // actually arrives by (re)building the converter inside the callback.
-        inputNode.installTap(onBus: 0, bufferSize: 4_096, format: nil) { [weak self] buffer, _ in
+        // The tap callback — pulled out so we can install the same closure
+        // both on the initial attempt and on the retry after a Bluetooth-
+        // settle delay, without duplicating the body.
+        let tapBlock: AVAudioNodeTapBlock = { [weak self] buffer, _ in
             guard let self else { return }
 
             // Lazy / adaptive converter: if the buffer's format doesn't match
@@ -325,7 +331,68 @@ final class AudioRecorder: @unchecked Sendable {
             }
         }
 
-        try engine.start()
+        // Wrap installTap in an Obj-C try/catch via the WHTryBlock bridge.
+        // Even after `engine.prepare()` and our Swift-side validation, the
+        // bus format can flip back to invalid in the microseconds between
+        // our read and AVFoundation's internal re-read inside installTap —
+        // we've seen this happen on Bluetooth during the A2DP→HFP profile
+        // switch. NSException raised there can't be caught by Swift's
+        // do/catch and aborts the process via std::terminate.
+        //
+        // We attempt the install once, and if it throws, sleep ~250 ms (a
+        // typical Bluetooth profile-switch window) and try once more. If the
+        // second attempt also throws, surface a clean Swift error so the
+        // user sees "Mic not ready — try again" instead of a crash.
+        func attemptInstall() -> NSException? {
+            return WHTryBlock {
+                inputNode.installTap(onBus: 0, bufferSize: 4_096, format: nil, block: tapBlock)
+            }
+        }
+
+        if let firstException = attemptInstall() {
+            logger.warning(
+                "installTap threw on first attempt: \(firstException.name.rawValue, privacy: .public) — \(firstException.reason ?? "<no reason>", privacy: .public). Retrying after 250 ms."
+            )
+            // Belt-and-suspenders: make sure no half-installed tap is left
+            // behind before retrying. The exception path may or may not have
+            // unwound state inside AVFoundation, and a stale tap would make
+            // the retry crash with "tap already installed".
+            inputNode.removeTap(onBus: 0)
+            Thread.sleep(forTimeInterval: 0.25)
+
+            if let secondException = attemptInstall() {
+                logger.error(
+                    "installTap threw on retry: \(secondException.name.rawValue, privacy: .public) — \(secondException.reason ?? "<no reason>", privacy: .public). Bailing out."
+                )
+                // Tear down our own partial state so a follow-up call gets a
+                // clean slate.
+                inputNode.removeTap(onBus: 0)
+                audioFile = nil
+                converter = nil
+                converterInputFormat = nil
+                processingFormat = nil
+                try? FileManager.default.removeItem(at: url)
+                currentURL = nil
+                throw AudioRecorderError.installTapFailed(
+                    reason: secondException.reason ?? secondException.name.rawValue
+                )
+            }
+        }
+
+        do {
+            try engine.start()
+        } catch {
+            // engine.start can also throw — clean up the tap we just installed
+            // so the next attempt isn't doomed by a leftover tap.
+            inputNode.removeTap(onBus: 0)
+            audioFile = nil
+            converter = nil
+            converterInputFormat = nil
+            processingFormat = nil
+            try? FileManager.default.removeItem(at: url)
+            currentURL = nil
+            throw AudioRecorderError.engineFailure(error)
+        }
         isRecording = true
         logger.info("Recording started → \(url.lastPathComponent, privacy: .public) (input: \(inputFormat.sampleRate, privacy: .public) Hz, \(inputFormat.channelCount, privacy: .public) ch)")
     }
